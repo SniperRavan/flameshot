@@ -17,6 +17,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLoggingCategory>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
@@ -24,6 +25,8 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScreen>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QShortcut>
 #include <QSplitter>
 #include <QStyle>
@@ -57,6 +60,15 @@ OcrCanvas::OcrCanvas(const QPixmap& pixmap,
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMinimumSize(320, 240);
     setFocusPolicy(Qt::StrongFocus);
+}
+
+QSize OcrCanvas::sizeHint() const
+{
+    if (m_pixmap.isNull()) {
+        return QSize(400, 300);
+    }
+    return QSize(qMax(320, qRound(m_pixmap.width() * m_zoomFactor)),
+                 qMax(240, qRound(m_pixmap.height() * m_zoomFactor)));
 }
 
 void OcrCanvas::setFilterQuery(const QString& query)
@@ -123,6 +135,8 @@ void OcrCanvas::setZoomFactor(qreal factor)
     qreal newZoom = qBound(0.25, factor, 6.0);
     if (!qFuzzyCompare(m_zoomFactor, newZoom)) {
         m_zoomFactor = newZoom;
+        updateGeometry();
+        resize(sizeHint());
         emit zoomChanged(m_zoomFactor);
         update();
     }
@@ -466,6 +480,9 @@ OcrWidget::OcrWidget(const QPixmap& pixmap,
   , m_lines(lines)
   , m_toastTimer(new QTimer(this))
 {
+    // Filter out font shaper warning logs
+    QLoggingCategory::setFilterRules(QStringLiteral("qt.text.font.db.warning=false\nqt.text.font.warning=false\nqt.text.font=false"));
+
     setWindowIcon(QIcon(GlobalValues::iconPath()));
     setWindowFlags(Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint | Qt::Dialog);
     setAttribute(Qt::WA_TranslucentBackground);
@@ -562,13 +579,13 @@ void OcrWidget::setupUi()
     });
 
     // ------------------------------------------------------------------------
-    // 3. Central Splitter (Visual Canvas with Zoom Toolbar + Text Panel)
+    // 3. Central Splitter (Visual Canvas with Scrollbars + Text Panel)
     // ------------------------------------------------------------------------
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     splitter->setObjectName(QStringLiteral("splitter"));
     splitter->setChildrenCollapsible(false);
 
-    // Left Pane: Visual Canvas Container (with overlay zoom controls)
+    // Left Pane: Visual Canvas Container (with Horizontal & Vertical Scrollbars)
     auto* canvasContainer = new QWidget(this);
     auto* canvasLayout = new QVBoxLayout(canvasContainer);
     canvasLayout->setContentsMargins(0, 0, 0, 0);
@@ -580,7 +597,15 @@ void OcrWidget::setupUi()
     });
     connect(m_canvas, &OcrCanvas::statusMessageRequested, this, &OcrWidget::showToast);
     connect(m_canvas, &OcrCanvas::zoomChanged, this, &OcrWidget::updateZoomBadge);
-    canvasLayout->addWidget(m_canvas, 1);
+
+    auto* scrollArea = new QScrollArea(this);
+    scrollArea->setObjectName(QStringLiteral("canvasScrollArea"));
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setAlignment(Qt::AlignCenter);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    scrollArea->setWidget(m_canvas);
+    canvasLayout->addWidget(scrollArea, 1);
 
     // Zoom toolbar directly under preview canvas
     auto* zoomBarLayout = new QHBoxLayout();
@@ -832,13 +857,49 @@ void OcrWidget::applyTheme()
       "    border: 1px solid %1;"
       "    font-weight: bold;"
       "}"
+      "#canvasScrollArea {"
+      "    border: 1px solid #333842;"
+      "    border-radius: 6px;"
+      "    background-color: #16181d;"
+      "}"
+      "QScrollBar:vertical {"
+      "    background: #1e222b;"
+      "    width: 10px;"
+      "    border-radius: 5px;"
+      "    margin: 0px;"
+      "}"
+      "QScrollBar::handle:vertical {"
+      "    background: #3e4451;"
+      "    min-height: 24px;"
+      "    border-radius: 5px;"
+      "}"
+      "QScrollBar::handle:vertical:hover {"
+      "    background: %1;"
+      "}"
+      "QScrollBar:horizontal {"
+      "    background: #1e222b;"
+      "    height: 10px;"
+      "    border-radius: 5px;"
+      "    margin: 0px;"
+      "}"
+      "QScrollBar::handle:horizontal {"
+      "    background: #3e4451;"
+      "    min-width: 24px;"
+      "    border-radius: 5px;"
+      "}"
+      "QScrollBar::handle:horizontal:hover {"
+      "    background: %1;"
+      "}"
+      "QScrollBar::add-line, QScrollBar::sub-line {"
+      "    border: none;"
+      "    background: none;"
+      "}"
       "#textEdit {"
       "    background-color: #21252b;"
       "    color: #d7dae0;"
       "    border: 1px solid #333842;"
       "    border-radius: 6px;"
       "    padding: 10px;"
-      "    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', 'Noto Sans Bengali', 'Noto Sans Devanagari', Roboto, Arial, sans-serif;"
       "    font-size: 13px;"
       "    line-height: 1.6;"
       "}"

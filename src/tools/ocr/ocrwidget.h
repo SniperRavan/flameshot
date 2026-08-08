@@ -45,6 +45,8 @@ public:
     void setZoomFactor(qreal factor);
     qreal zoomFactor() const { return m_zoomFactor; }
 
+    QSize sizeHint() const override;
+
 signals:
     void wordDoubleClicked(const QString& word);
     void selectionChanged();
