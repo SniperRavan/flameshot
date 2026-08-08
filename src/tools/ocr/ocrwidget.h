@@ -67,6 +67,7 @@ private:
     QRect mapToCanvas(const QRect& r) const;
     QRect mapFromCanvas(const QRect& r) const;
     int findWordAt(const QPoint& pos) const;
+    void updateCanvasSize();
 
     QPixmap m_pixmap;
     QVector<QRect> m_wordBoxes;

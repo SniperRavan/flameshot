@@ -57,9 +57,19 @@ OcrCanvas::OcrCanvas(const QPixmap& pixmap,
   , m_lines(lines)
 {
     setMouseTracking(true);
-    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    setMinimumSize(320, 240);
     setFocusPolicy(Qt::StrongFocus);
+    updateCanvasSize();
+}
+
+void OcrCanvas::updateCanvasSize()
+{
+    if (m_pixmap.isNull()) {
+        setFixedSize(360, 260);
+        return;
+    }
+    int w = qMax(120, qRound(m_pixmap.width() * m_zoomFactor));
+    int h = qMax(90, qRound(m_pixmap.height() * m_zoomFactor));
+    setFixedSize(w, h);
 }
 
 QSize OcrCanvas::sizeHint() const
@@ -67,8 +77,8 @@ QSize OcrCanvas::sizeHint() const
     if (m_pixmap.isNull()) {
         return QSize(400, 300);
     }
-    return QSize(qMax(320, qRound(m_pixmap.width() * m_zoomFactor)),
-                 qMax(240, qRound(m_pixmap.height() * m_zoomFactor)));
+    return QSize(qMax(120, qRound(m_pixmap.width() * m_zoomFactor)),
+                 qMax(90, qRound(m_pixmap.height() * m_zoomFactor)));
 }
 
 void OcrCanvas::setFilterQuery(const QString& query)
@@ -135,8 +145,7 @@ void OcrCanvas::setZoomFactor(qreal factor)
     qreal newZoom = qBound(0.25, factor, 6.0);
     if (!qFuzzyCompare(m_zoomFactor, newZoom)) {
         m_zoomFactor = newZoom;
-        updateGeometry();
-        resize(sizeHint());
+        updateCanvasSize();
         emit zoomChanged(m_zoomFactor);
         update();
     }
@@ -144,49 +153,27 @@ void OcrCanvas::setZoomFactor(qreal factor)
 
 QRect OcrCanvas::mapToCanvas(const QRect& r) const
 {
-    if (m_pixmap.isNull() || width() <= 0 || height() <= 0) {
-        return QRect();
-    }
-    const qreal baseScaleX = static_cast<qreal>(width()) / m_pixmap.width();
-    const qreal baseScaleY = static_cast<qreal>(height()) / m_pixmap.height();
-    const qreal scale = qMin(baseScaleX, baseScaleY) * m_zoomFactor;
-
-    const qreal offX = (width() - m_pixmap.width() * scale) / 2.0 + m_panOffset.x();
-    const qreal offY = (height() - m_pixmap.height() * scale) / 2.0 + m_panOffset.y();
-
-    return QRect(qRound(offX + r.x() * scale),
-                 qRound(offY + r.y() * scale),
-                 qMax(2, qRound(r.width() * scale)),
-                 qMax(2, qRound(r.height() * scale)));
+    return QRect(qRound(r.x() * m_zoomFactor),
+                 qRound(r.y() * m_zoomFactor),
+                 qMax(2, qRound(r.width() * m_zoomFactor)),
+                 qMax(2, qRound(r.height() * m_zoomFactor)));
 }
 
 QRect OcrCanvas::mapFromCanvas(const QRect& r) const
 {
-    if (m_pixmap.isNull() || width() <= 0 || height() <= 0) {
+    if (m_zoomFactor <= 0.0) {
         return QRect();
     }
-    const qreal baseScaleX = static_cast<qreal>(width()) / m_pixmap.width();
-    const qreal baseScaleY = static_cast<qreal>(height()) / m_pixmap.height();
-    const qreal scale = qMin(baseScaleX, baseScaleY) * m_zoomFactor;
-
-    if (scale <= 0.0) {
-        return QRect();
-    }
-
-    const qreal offX = (width() - m_pixmap.width() * scale) / 2.0 + m_panOffset.x();
-    const qreal offY = (height() - m_pixmap.height() * scale) / 2.0 + m_panOffset.y();
-
-    return QRect(qRound((r.x() - offX) / scale),
-                 qRound((r.y() - offY) / scale),
-                 qRound(r.width() / scale),
-                 qRound(r.height() / scale));
+    return QRect(qRound(r.x() / m_zoomFactor),
+                 qRound(r.y() / m_zoomFactor),
+                 qRound(r.width() / m_zoomFactor),
+                 qRound(r.height() / m_zoomFactor));
 }
 
 int OcrCanvas::findWordAt(const QPoint& pos) const
 {
     for (int i = 0; i < m_wordBoxes.size(); ++i) {
         QRect canvasRect = mapToCanvas(m_wordBoxes.at(i));
-        // Add 3px margin for easy selection
         if (canvasRect.adjusted(-3, -3, 3, 3).contains(pos)) {
             return i;
         }
@@ -207,24 +194,11 @@ void OcrCanvas::paintEvent(QPaintEvent*)
         return;
     }
 
-    const qreal baseScaleX = static_cast<qreal>(width()) / m_pixmap.width();
-    const qreal baseScaleY = static_cast<qreal>(height()) / m_pixmap.height();
-    const qreal scale = qMin(baseScaleX, baseScaleY) * m_zoomFactor;
-
-    const int targetW = qRound(m_pixmap.width() * scale);
-    const int targetH = qRound(m_pixmap.height() * scale);
-    const int offX = (width() - targetW) / 2 + m_panOffset.x();
-    const int offY = (height() - targetH) / 2 + m_panOffset.y();
-    const QRect imgRect(offX, offY, targetW, targetH);
-
-    // Clip to canvas rect
-    p.setClipRect(rect());
-
-    // Draw capture image
-    p.drawPixmap(imgRect, m_pixmap);
+    // Draw capture image scaled
+    p.drawPixmap(rect(), m_pixmap);
 
     // Subtle dark overlay to let bounding boxes pop
-    p.fillRect(imgRect, QColor(0, 0, 0, 25));
+    p.fillRect(rect(), QColor(0, 0, 0, 20));
 
     ConfigHandler conf;
     const QColor baseColor = conf.uiColor();
@@ -274,25 +248,21 @@ void OcrCanvas::paintEvent(QPaintEvent*)
 
 void OcrCanvas::wheelEvent(QWheelEvent* event)
 {
-    const int delta = event->angleDelta().y();
-    if (delta > 0) {
-        zoomIn();
-    } else if (delta < 0) {
-        zoomOut();
+    if (event->modifiers() & Qt::ControlModifier) {
+        const int delta = event->angleDelta().y();
+        if (delta > 0) {
+            zoomIn();
+        } else if (delta < 0) {
+            zoomOut();
+        }
+        event->accept();
+    } else {
+        QWidget::wheelEvent(event);
     }
-    event->accept();
 }
 
 void OcrCanvas::mousePressEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::MiddleButton ||
-        (event->button() == Qt::LeftButton && (event->modifiers() & Qt::AltModifier))) {
-        m_isPanning = true;
-        m_panStart = event->pos() - m_panOffset;
-        setCursor(Qt::ClosedHandCursor);
-        return;
-    }
-
     if (event->button() == Qt::LeftButton) {
         m_selectionStart = event->pos();
         m_selectionCurrent = event->pos();
@@ -322,12 +292,6 @@ void OcrCanvas::mousePressEvent(QMouseEvent* event)
 
 void OcrCanvas::mouseMoveEvent(QMouseEvent* event)
 {
-    if (m_isPanning) {
-        m_panOffset = event->pos() - m_panStart;
-        update();
-        return;
-    }
-
     if (m_isSelecting) {
         m_selectionCurrent = event->pos();
         QRect selRect = QRect(m_selectionStart, m_selectionCurrent).normalized();
@@ -360,10 +324,6 @@ void OcrCanvas::mouseMoveEvent(QMouseEvent* event)
 
 void OcrCanvas::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (m_isPanning) {
-        m_isPanning = false;
-        unsetCursor();
-    }
     if (event->button() == Qt::LeftButton && m_isSelecting) {
         m_isSelecting = false;
         update();
@@ -436,13 +396,13 @@ void OcrCanvas::contextMenuEvent(QContextMenuEvent* event)
         menu.addSeparator();
     }
 
-    QAction* zoomInAct = menu.addAction(tr("Zoom In (Wheel Up)"));
+    QAction* zoomInAct = menu.addAction(tr("Zoom In (Ctrl+Wheel Up)"));
     connect(zoomInAct, &QAction::triggered, this, &OcrCanvas::zoomIn);
 
-    QAction* zoomOutAct = menu.addAction(tr("Zoom Out (Wheel Down)"));
+    QAction* zoomOutAct = menu.addAction(tr("Zoom Out (Ctrl+Wheel Down)"));
     connect(zoomOutAct, &QAction::triggered, this, &OcrCanvas::zoomOut);
 
-    QAction* zoomFitAct = menu.addAction(tr("Zoom Fit"));
+    QAction* zoomFitAct = menu.addAction(tr("Zoom Fit (100%)"));
     connect(zoomFitAct, &QAction::triggered, this, &OcrCanvas::zoomFit);
 
     menu.addSeparator();
@@ -600,7 +560,7 @@ void OcrWidget::setupUi()
 
     auto* scrollArea = new QScrollArea(this);
     scrollArea->setObjectName(QStringLiteral("canvasScrollArea"));
-    scrollArea->setWidgetResizable(true);
+    scrollArea->setWidgetResizable(false);
     scrollArea->setAlignment(Qt::AlignCenter);
     scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
@@ -615,7 +575,7 @@ void OcrWidget::setupUi()
     zoomOutBtn->setObjectName(QStringLiteral("zoomBtn"));
     zoomOutBtn->setFixedSize(28, 24);
     zoomOutBtn->setCursor(Qt::PointingHandCursor);
-    zoomOutBtn->setToolTip(tr("Zoom Out"));
+    zoomOutBtn->setToolTip(tr("Zoom Out (Ctrl+Wheel Down)"));
     connect(zoomOutBtn, &QPushButton::clicked, m_canvas, &OcrCanvas::zoomOut);
 
     auto* zoom100Btn = new QPushButton(QStringLiteral("100%"), this);
@@ -632,7 +592,7 @@ void OcrWidget::setupUi()
     zoomInBtn->setObjectName(QStringLiteral("zoomBtn"));
     zoomInBtn->setFixedSize(28, 24);
     zoomInBtn->setCursor(Qt::PointingHandCursor);
-    zoomInBtn->setToolTip(tr("Zoom In"));
+    zoomInBtn->setToolTip(tr("Zoom In (Ctrl+Wheel Up)"));
     connect(zoomInBtn, &QPushButton::clicked, m_canvas, &OcrCanvas::zoomIn);
 
     auto* zoomFitBtn = new QPushButton(tr("Fit"), this);
