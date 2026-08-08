@@ -136,6 +136,7 @@ private:
     QLabel* m_toastLabel{ nullptr };
     QLabel* m_statsBadge{ nullptr };
     QLabel* m_zoomBadge{ nullptr };
+    QPushButton* m_zoomBtn{ nullptr };
     QTimer* m_toastTimer{ nullptr };
     QGraphicsDropShadowEffect* m_shadowEffect{ nullptr };
 

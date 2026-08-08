@@ -120,7 +120,7 @@ void OcrCanvas::zoomFit()
 
 void OcrCanvas::setZoomFactor(qreal factor)
 {
-    qreal newZoom = qBound(0.2, factor, 6.0);
+    qreal newZoom = qBound(0.25, factor, 6.0);
     if (!qFuzzyCompare(m_zoomFactor, newZoom)) {
         m_zoomFactor = newZoom;
         emit zoomChanged(m_zoomFactor);
@@ -172,8 +172,8 @@ int OcrCanvas::findWordAt(const QPoint& pos) const
 {
     for (int i = 0; i < m_wordBoxes.size(); ++i) {
         QRect canvasRect = mapToCanvas(m_wordBoxes.at(i));
-        // Add 2px margin for easy selection
-        if (canvasRect.adjusted(-2, -2, 2, 2).contains(pos)) {
+        // Add 3px margin for easy selection
+        if (canvasRect.adjusted(-3, -3, 3, 3).contains(pos)) {
             return i;
         }
     }
@@ -408,7 +408,7 @@ void OcrCanvas::contextMenuEvent(QContextMenuEvent* event)
                 selText.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
                 QDesktopServices::openUrl(QUrl(selText.trimmed()));
             } else {
-                QUrl url(QStringLiteral("https://duckduckgo.com/?q=") + QUrl::toPercentEncoding(selText));
+                QUrl url(QStringLiteral("https://www.google.com/search?q=") + QUrl::toPercentEncoding(selText));
                 QDesktopServices::openUrl(url);
             }
         });
@@ -588,27 +588,32 @@ void OcrWidget::setupUi()
 
     auto* zoomOutBtn = new QPushButton(QStringLiteral("−"), this);
     zoomOutBtn->setObjectName(QStringLiteral("zoomBtn"));
-    zoomOutBtn->setFixedSize(26, 22);
+    zoomOutBtn->setFixedSize(28, 24);
+    zoomOutBtn->setCursor(Qt::PointingHandCursor);
     zoomOutBtn->setToolTip(tr("Zoom Out"));
     connect(zoomOutBtn, &QPushButton::clicked, m_canvas, &OcrCanvas::zoomOut);
 
     auto* zoom100Btn = new QPushButton(QStringLiteral("100%"), this);
     zoom100Btn->setObjectName(QStringLiteral("zoomBtn"));
-    zoom100Btn->setFixedSize(48, 22);
+    zoom100Btn->setFixedSize(54, 24);
+    zoom100Btn->setCursor(Qt::PointingHandCursor);
     zoom100Btn->setToolTip(tr("Reset Zoom (100%)"));
+    m_zoomBtn = zoom100Btn;
     connect(zoom100Btn, &QPushButton::clicked, this, [this]() {
         m_canvas->zoomFit();
     });
 
     auto* zoomInBtn = new QPushButton(QStringLiteral("+"), this);
     zoomInBtn->setObjectName(QStringLiteral("zoomBtn"));
-    zoomInBtn->setFixedSize(26, 22);
+    zoomInBtn->setFixedSize(28, 24);
+    zoomInBtn->setCursor(Qt::PointingHandCursor);
     zoomInBtn->setToolTip(tr("Zoom In"));
     connect(zoomInBtn, &QPushButton::clicked, m_canvas, &OcrCanvas::zoomIn);
 
     auto* zoomFitBtn = new QPushButton(tr("Fit"), this);
     zoomFitBtn->setObjectName(QStringLiteral("zoomBtn"));
-    zoomFitBtn->setFixedSize(38, 22);
+    zoomFitBtn->setFixedSize(42, 24);
+    zoomFitBtn->setCursor(Qt::PointingHandCursor);
     zoomFitBtn->setToolTip(tr("Fit to View"));
     connect(zoomFitBtn, &QPushButton::clicked, m_canvas, &OcrCanvas::zoomFit);
 
@@ -755,10 +760,8 @@ void OcrWidget::setupUi()
 void OcrWidget::applyTheme()
 {
     QString accentHex = m_accentColor.name();
-    QString accentRgba = QStringLiteral("rgba(%1, %2, %3, 0.9)")
-                           .arg(m_accentColor.red())
-                           .arg(m_accentColor.green())
-                           .arg(m_accentColor.blue());
+    QString accentHover = m_accentColor.lighter(135).name();
+    QString accentPressed = m_accentColor.darker(120).name();
 
     setStyleSheet(QString(
       "#mainContainer {"
@@ -791,7 +794,7 @@ void OcrWidget::applyTheme()
       "    color: #ffffff;"
       "}"
       "#toastLabel {"
-      "    background-color: %2;"
+      "    background-color: %1;"
       "    color: #ffffff;"
       "    font-weight: bold;"
       "    border-radius: 6px;"
@@ -821,6 +824,7 @@ void OcrWidget::applyTheme()
       "#zoomBtn:hover {"
       "    background-color: #3e4451;"
       "    color: #ffffff;"
+      "    border: 1px solid %1;"
       "}"
       "#fmtBtn:checked, #lineBtn:checked, #singleBtn:checked {"
       "    background-color: %1;"
@@ -841,13 +845,19 @@ void OcrWidget::applyTheme()
       "#copyAllBtn {"
       "    background-color: %1;"
       "    color: #ffffff;"
-      "    border: none;"
+      "    border: 1px solid rgba(255, 255, 255, 0.25);"
       "    border-radius: 6px;"
-      "    padding: 6px 14px;"
+      "    padding: 6px 16px;"
       "    font-weight: bold;"
+      "    font-size: 13px;"
       "}"
       "#copyAllBtn:hover {"
       "    background-color: %2;"
+      "    border: 1px solid rgba(255, 255, 255, 0.6);"
+      "    color: #ffffff;"
+      "}"
+      "#copyAllBtn:pressed {"
+      "    background-color: %3;"
       "}"
       "#copySelBtn, #actionBtn, #doneBtn {"
       "    background-color: #282c34;"
@@ -856,18 +866,27 @@ void OcrWidget::applyTheme()
       "    border-radius: 6px;"
       "    padding: 6px 12px;"
       "    font-size: 12px;"
+      "    font-weight: 500;"
       "}"
       "#copySelBtn:hover, #actionBtn:hover, #doneBtn:hover {"
       "    background-color: #3e4451;"
       "    color: #ffffff;"
+      "    border: 1px solid %1;"
+      "}"
+      "#copySelBtn:pressed, #actionBtn:pressed, #doneBtn:pressed {"
+      "    background-color: #21252b;"
       "}")
-      .arg(accentHex, accentRgba));
+      .arg(accentHex, accentHover, accentPressed));
 }
 
 void OcrWidget::updateZoomBadge(qreal factor)
 {
+    QString pctStr = QStringLiteral("%1%").arg(qRound(factor * 100));
     if (m_zoomBadge) {
-        m_zoomBadge->setText(QStringLiteral("%1%").arg(qRound(factor * 100)));
+        m_zoomBadge->setText(pctStr);
+    }
+    if (m_zoomBtn) {
+        m_zoomBtn->setText(pctStr);
     }
 }
 
@@ -916,7 +935,7 @@ void OcrWidget::searchWeb()
             txt.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
             QDesktopServices::openUrl(QUrl(txt));
         } else {
-            QUrl url(QStringLiteral("https://duckduckgo.com/?q=") + QUrl::toPercentEncoding(txt));
+            QUrl url(QStringLiteral("https://www.google.com/search?q=") + QUrl::toPercentEncoding(txt));
             QDesktopServices::openUrl(url);
         }
     }
