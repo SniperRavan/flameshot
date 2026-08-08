@@ -489,78 +489,148 @@ void Flameshot::exportCapture(const QPixmap& capture,
 
     if (tasks & CR::OCR) {
 #ifdef ENABLE_OCR
-        // 1. Scale by 3x using FastTransformation to preserve tiny punctuation pixel intensity
-        QImage img = capture.toImage().scaled(capture.width() * 3, capture.height() * 3, Qt::KeepAspectRatio, Qt::FastTransformation);
+        // 1. High-quality smooth scaling (2.5x - 3.0x) to optimize character resolution for Tesseract LSTM
+        QImage srcImg = capture.toImage();
+        const int origWidth = srcImg.width();
+        const int origHeight = srcImg.height();
+
+        qreal scaleFactor = 2.5;
+        if (origWidth < 350 || origHeight < 350) {
+            scaleFactor = 3.0;
+        } else if (origWidth > 1600 || origHeight > 1600) {
+            scaleFactor = 1.8;
+        }
+
+        const int targetW = qMax(1, qRound(origWidth * scaleFactor));
+        const int targetH = qMax(1, qRound(origHeight * scaleFactor));
+        QImage img = srcImg.scaled(targetW, targetH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         img = img.convertToFormat(QImage::Format_Grayscale8);
 
-        int width = img.width();
-        int height = img.height();
+        const int width = img.width();
+        const int height = img.height();
 
-        // 2. Detect global background polarity (light vs dark mode)
+        // 2. Measure luminance distribution and detect background polarity
         long long globalSum = 0;
+        int minVal = 255;
+        int maxVal = 0;
         for (int y = 0; y < height; ++y) {
-            const uchar* line = img.scanLine(y);
+            const uchar* line = img.constScanLine(y);
             for (int x = 0; x < width; ++x) {
-                globalSum += line[x];
+                const uchar val = line[x];
+                globalSum += val;
+                if (val < minVal) minVal = val;
+                if (val > maxVal) maxVal = val;
             }
         }
-        bool isLightBg = (globalSum / (width * height)) > 127;
+        const bool isLightBg = (globalSum / (static_cast<long long>(width) * height)) > 127;
 
-        // 3. Compute integral image (Summed Area Table) for O(1) local mean calculations
-        QVector<QVector<int>> sat(width + 1, QVector<int>(height + 1, 0));
-        for (int y = 0; y < height; ++y) {
-            const uchar* line = img.scanLine(y);
-            for (int x = 0; x < width; ++x) {
-                sat[x + 1][y + 1] = sat[x][y + 1] + sat[x + 1][y] - sat[x][y] + line[x];
-            }
-        }
-
-        // 4. Perform Local Adaptive Thresholding: Output black text on pure white background
-        QImage bin(width, height, QImage::Format_Grayscale8);
-        int w = 51; // Larger local window size (prevents hollowing of thick font strokes and bullet points)
-        int half = w / 2;
-        int C = 10; // Lower contrast threshold constant to catch dim gray text
+        // 3. Normalize grayscale contrast and invert dark mode while preserving anti-aliased subpixel edges
+        QImage procImg(width, height, QImage::Format_Grayscale8);
+        const int range = qMax(1, maxVal - minVal);
 
         for (int y = 0; y < height; ++y) {
-            const uchar* imgLine = img.scanLine(y);
-            uchar* binLine = bin.scanLine(y);
+            const uchar* srcLine = img.constScanLine(y);
+            uchar* dstLine = procImg.scanLine(y);
             for (int x = 0; x < width; ++x) {
-                int x1 = qMax(0, x - half);
-                int x2 = qMin(width - 1, x + half);
-                int y1 = qMax(0, y - half);
-                int y2 = qMin(height - 1, y + half);
-                int count = (x2 - x1 + 1) * (y2 - y1 + 1);
-
-                int sum = sat[x2 + 1][y2 + 1] - sat[x1][y2 + 1] - sat[x2 + 1][y1] + sat[x1][y1];
-                int mean = sum / count;
-
-                if (isLightBg) {
-                    // Light mode: text is darker than neighbors
-                    binLine[x] = (imgLine[x] < mean - C) ? 0 : 255;
+                const int v = srcLine[x];
+                int norm = (v - minVal) * 255 / range;
+                norm = qBound(0, norm, 255);
+                if (!isLightBg) {
+                    // Dark mode: invert so text is dark on pure light background
+                    dstLine[x] = static_cast<uchar>(255 - norm);
                 } else {
-                    // Dark mode: text is lighter than neighbors
-                    binLine[x] = (imgLine[x] > mean + C) ? 0 : 255;
+                    dstLine[x] = static_cast<uchar>(norm);
                 }
             }
         }
-        img = bin;
 
-        tesseract::TessBaseAPI* api = new tesseract::TessBaseAPI();
+        // 4. Run Tesseract with optimized DPI and layout parameters
+        auto* api = new tesseract::TessBaseAPI();
         if (api->Init(nullptr, "eng") == 0) {
             api->SetVariable("load_system_dawg", "0");
             api->SetVariable("load_freq_dawg", "0");
-            api->SetImage(img.bits(), img.width(), img.height(), 1, img.bytesPerLine());
+            api->SetVariable("user_defined_dpi", "300");
+            api->SetVariable("preserve_interword_spaces", "1");
+            api->SetPageSegMode(tesseract::PSM_AUTO);
+
+            api->SetImage(procImg.bits(), procImg.width(), procImg.height(), 1, procImg.bytesPerLine());
+            api->Recognize(0);
+
             char* outText = api->GetUTF8Text();
             QString result = QString::fromUtf8(outText).trimmed();
             delete[] outText;
+
+            // Fallback: If full page detection found nothing, try sparse text / single block mode
+            if (result.isEmpty()) {
+                api->SetPageSegMode(tesseract::PSM_SPARSE_TEXT_OSD);
+                api->SetImage(procImg.bits(), procImg.width(), procImg.height(), 1, procImg.bytesPerLine());
+                api->Recognize(0);
+                outText = api->GetUTF8Text();
+                result = QString::fromUtf8(outText).trimmed();
+                delete[] outText;
+            }
+
+            // Post-process bullet points and formatting
+            result.replace(QRegularExpression("(^|\\n)[e◦o°*+•] (?=[A-Z])"), "\\1• ");
+            // Clean up standalone emoji/icon misrecognition artifacts at start of lines (e.g. '@ Copy' -> 'Copy')
+            result.replace(QRegularExpression("(^|\\n)(?:W@|@|€|xs|©|®|¢)\\s+(?=[A-Z])"), "\\1");
+
+            // 5. Extract structured word and line bounding boxes for interactive UI overlay
+            QVector<QRect> lineBoxes;
+            QStringList lines;
+            QVector<QRect> wordBoxes;
+            QStringList words;
+
+            tesseract::ResultIterator* ri = api->GetIterator();
+            if (ri) {
+                // Line extraction
+                do {
+                    const char* lText = ri->GetUTF8Text(tesseract::RIL_TEXTLINE);
+                    if (lText) {
+                        QString lStr = QString::fromUtf8(lText).trimmed();
+                        delete[] lText;
+                        if (!lStr.isEmpty()) {
+                            int x1, y1, x2, y2;
+                            ri->BoundingBox(tesseract::RIL_TEXTLINE, &x1, &y1, &x2, &y2);
+                            int bx = qRound(x1 / scaleFactor);
+                            int by = qRound(y1 / scaleFactor);
+                            int bw = qMax(1, qRound((x2 - x1) / scaleFactor));
+                            int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
+                            lineBoxes.append(QRect(bx, by, bw, bh));
+                            lines.append(lStr);
+                        }
+                    }
+                } while (ri->Next(tesseract::RIL_TEXTLINE));
+
+                // Word extraction
+                ri = api->GetIterator();
+                if (ri) {
+                    do {
+                        const char* wText = ri->GetUTF8Text(tesseract::RIL_WORD);
+                        if (wText) {
+                            QString wStr = QString::fromUtf8(wText).trimmed();
+                            delete[] wText;
+                            if (!wStr.isEmpty()) {
+                                int x1, y1, x2, y2;
+                                ri->BoundingBox(tesseract::RIL_WORD, &x1, &y1, &x2, &y2);
+                                int bx = qRound(x1 / scaleFactor);
+                                int by = qRound(y1 / scaleFactor);
+                                int bw = qMax(1, qRound((x2 - x1) / scaleFactor));
+                                int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
+                                wordBoxes.append(QRect(bx, by, bw, bh));
+                                words.append(wStr);
+                            }
+                        }
+                    } while (ri->Next(tesseract::RIL_WORD));
+                }
+            }
+
             api->End();
             delete api;
 
-            // Post-process to normalize line-leading bullet points (like 'e ', 'o ', '*', '+') followed by a capital letter
-            result.replace(QRegularExpression("(^|\\n)[e◦o°*+•] (?=[A-Z])"), "\\1• ");
-
             if (!result.isEmpty()) {
                 FlameshotDaemon::copyToClipboard(result, tr("Text extracted and copied to clipboard."));
+                FlameshotDaemon::createOcr(capture, selection, result, wordBoxes, words, lineBoxes, lines);
             } else {
                 AbstractLogger::warning(AbstractLogger::Target::Notification)
                   << tr("OCR found no text in the selection.");
