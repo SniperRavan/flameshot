@@ -544,8 +544,9 @@ void Flameshot::exportCapture(const QPixmap& capture,
             }
         }
 
-        // 4. Detect installed multi-language models (e.g. English, Bengali, Hindi, Tamil, Asian, European)
-        QStringList targetLangs = { "eng", "osd", "ben", "hin", "tam", "tel", "kan", "mal", "mar", "guj", "pan", "ara", "rus", "deu", "fra", "spa", "ita", "chi_sim", "jpn", "kor" };
+        // 4. Detect installed multi-language models (e.g. English, Bengali, Hindi, Tamil, Telugu, European, etc.)
+        // Note: Disjoint RTL scripts like Arabic are kept in separate pass to prevent RTL line reordering on LTR text
+        QStringList targetLangs = { "eng", "osd", "ben", "hin", "tam", "tel", "kan", "mal", "mar", "guj", "pan", "san", "ori", "urd", "rus", "deu", "fra", "spa", "ita", "por", "tur", "pol", "nld", "swe", "dan", "nor", "fin", "ces", "ell" };
         QStringList activeLangs;
         const QStringList searchDirs = {
             QStringLiteral("/usr/share/tesseract-ocr/5/tessdata/"),
@@ -607,13 +608,41 @@ void Flameshot::exportCapture(const QPixmap& capture,
             result.replace(QRegularExpression(QStringLiteral("(^|\\s)[@©®¢¥~|](?=[A-Za-z\\p{L}]{2,})")), QStringLiteral("\\1"));
             // 4. Clean up trailing OCR noise characters
             result.replace(QRegularExpression(QStringLiteral("[|~_]+(\\n|$)")), QStringLiteral("\\1"));
-            result = result.trimmed();
 
             // 5. Extract structured word and line bounding boxes for interactive UI overlay
             QVector<QRect> lineBoxes;
             QStringList lines;
             QVector<QRect> wordBoxes;
             QStringList words;
+
+            // Helper to detect colored UI emojis from screenshot
+            auto detectEmojiInBox = [&](const QRect& bBox) -> QString {
+                QRect r = bBox.intersected(srcImg.rect());
+                if (r.width() < 6 || r.height() < 6) return QString();
+                int totalColored = 0, redCount = 0, yellowCount = 0, blueCount = 0, greenCount = 0;
+                for (int y = r.y(); y <= r.bottom(); ++y) {
+                    const QRgb* line = reinterpret_cast<const QRgb*>(srcImg.constScanLine(y));
+                    for (int x = r.x(); x <= r.right(); ++x) {
+                        QColor c(line[x]);
+                        if (c.hsvSaturation() >= 80 && c.value() >= 60) {
+                            totalColored++;
+                            int h = c.hsvHue();
+                            if (h >= 330 || h <= 20) redCount++;
+                            else if (h >= 28 && h <= 65) yellowCount++;
+                            else if (h >= 180 && h <= 250) blueCount++;
+                            else if (h >= 80 && h <= 155) greenCount++;
+                        }
+                    }
+                }
+                int area = r.width() * r.height();
+                if (totalColored >= 15 && totalColored >= area * 0.06) {
+                    if (redCount >= totalColored * 0.40) return QStringLiteral("❤️");
+                    if (yellowCount >= totalColored * 0.35) return QStringLiteral("👍");
+                    if (blueCount >= totalColored * 0.40) return QStringLiteral("🔗");
+                    if (greenCount >= totalColored * 0.40) return QStringLiteral("✅");
+                }
+                return QString();
+            };
 
             tesseract::ResultIterator* ri = api->GetIterator();
             if (ri) {
@@ -635,7 +664,18 @@ void Flameshot::exportCapture(const QPixmap& capture,
                             int by = qRound(y1 / scaleFactor);
                             int bw = qMax(1, qRound((x2 - x1) / scaleFactor));
                             int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
-                            lineBoxes.append(QRect(bx, by, bw, bh));
+                            QRect lRect(bx, by, bw, bh);
+
+                            // Detect emoji on line tail or in line box
+                            QString emoji = detectEmojiInBox(lRect);
+                            if (!emoji.isEmpty()) {
+                                if (lStr.endsWith(QStringLiteral(" Y")) || lStr.endsWith(QStringLiteral(" の")) || lStr.endsWith(QStringLiteral(" ول"))) {
+                                    lStr.chop(2);
+                                    lStr.append(QStringLiteral(" ") + emoji);
+                                }
+                            }
+
+                            lineBoxes.append(lRect);
                             lines.append(lStr);
                         }
                     }
@@ -658,7 +698,14 @@ void Flameshot::exportCapture(const QPixmap& capture,
                                 int by = qRound(y1 / scaleFactor);
                                 int bw = qMax(1, qRound((x2 - x1) / scaleFactor));
                                 int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
-                                wordBoxes.append(QRect(bx, by, bw, bh));
+                                QRect wRect(bx, by, bw, bh);
+
+                                QString emoji = detectEmojiInBox(wRect);
+                                if (!emoji.isEmpty() && (wStr.size() <= 2 || wStr == QStringLiteral("Y") || wStr == QStringLiteral("の") || wStr == QStringLiteral("ول"))) {
+                                    wStr = emoji;
+                                }
+
+                                wordBoxes.append(wRect);
                                 words.append(wStr);
                             }
                         }
@@ -668,6 +715,11 @@ void Flameshot::exportCapture(const QPixmap& capture,
 
             api->End();
             delete api;
+
+            // Normalize result with cleaned lines
+            if (!lines.isEmpty()) {
+                result = lines.join(QStringLiteral("\n"));
+            }
 
             if (!result.isEmpty()) {
                 FlameshotDaemon::copyToClipboard(result, tr("Text extracted and copied to clipboard."));
