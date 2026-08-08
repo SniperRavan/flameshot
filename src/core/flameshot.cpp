@@ -544,9 +544,8 @@ void Flameshot::exportCapture(const QPixmap& capture,
             }
         }
 
-        // 4. Detect installed multi-language models (e.g. English, Bengali, Hindi, Tamil, Telugu, European, etc.)
-        // Note: Disjoint RTL scripts like Arabic are kept in separate pass to prevent RTL line reordering on LTR text
-        QStringList targetLangs = { "eng", "osd", "ben", "hin", "tam", "tel", "kan", "mal", "mar", "guj", "pan", "san", "ori", "urd", "rus", "deu", "fra", "spa", "ita", "por", "tur", "pol", "nld", "swe", "dan", "nor", "fin", "ces", "ell" };
+        // 4. Fast and accurate multi-language loader (Indic, Latin, and European)
+        QStringList targetLangs = { "eng", "osd", "ben", "hin", "tam", "tel", "kan", "mal", "mar", "guj", "pan", "deu", "fra", "spa", "ita", "rus" };
         QStringList activeLangs;
         const QStringList searchDirs = {
             QStringLiteral("/usr/share/tesseract-ocr/5/tessdata/"),
@@ -585,105 +584,55 @@ void Flameshot::exportCapture(const QPixmap& capture,
             api->SetImage(procImg.bits(), procImg.width(), procImg.height(), 1, procImg.bytesPerLine());
             api->Recognize(0);
 
-            char* outText = api->GetUTF8Text();
-            QString result = QString::fromUtf8(outText).trimmed();
-            delete[] outText;
+            // Helper to detect colored UI emojis in any bounding box
+            auto detectEmojiInBox = [&](const QRect& bBox) -> QString {
+                QRect r = bBox.intersected(srcImg.rect());
+                if (r.width() < 5 || r.height() < 5) return QString();
+                int totalColored = 0, redCount = 0, yellowCount = 0, blueCount = 0, greenCount = 0, darkRedCount = 0;
+                for (int y = r.y(); y <= r.bottom(); ++y) {
+                    const QRgb* line = reinterpret_cast<const QRgb*>(srcImg.constScanLine(y));
+                    for (int x = r.x(); x <= r.right(); ++x) {
+                        QColor c(line[x]);
+                        if (c.hsvSaturation() >= 60 && c.value() >= 45) {
+                            totalColored++;
+                            int h = c.hsvHue();
+                            if (h >= 325 || h <= 18) {
+                                redCount++;
+                            } else if (h >= 24 && h <= 68) {
+                                yellowCount++;
+                            } else if (h >= 180 && h <= 250) {
+                                blueCount++;
+                            } else if (h >= 80 && h <= 155) {
+                                greenCount++;
+                            }
+                        }
+                    }
+                }
+                int area = r.width() * r.height();
+                if (totalColored >= 10 && totalColored >= area * 0.05) {
+                    if (redCount >= totalColored * 0.35) return QStringLiteral("❤️");
+                    if (yellowCount >= totalColored * 0.35) return QStringLiteral("👍");
+                    if (blueCount >= totalColored * 0.35) return QStringLiteral("🔗");
+                    if (greenCount >= totalColored * 0.35) return QStringLiteral("✅");
+                }
+                return QString();
+            };
 
-            // Fallback: If full page detection found nothing, try sparse text / single block mode
-            if (result.isEmpty()) {
-                api->SetPageSegMode(tesseract::PSM_SPARSE_TEXT_OSD);
-                api->SetImage(procImg.bits(), procImg.width(), procImg.height(), 1, procImg.bytesPerLine());
-                api->Recognize(0);
-                outText = api->GetUTF8Text();
-                result = QString::fromUtf8(outText).trimmed();
-                delete[] outText;
-            }
-
-            // Smart regex post-processing:
-            // 1. Normalize line-leading bullet points
-            result.replace(QRegularExpression(QStringLiteral("(^|\\n)[e◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}])")), QStringLiteral("\\1• "));
-            // 2. Clean up common misrecognized emoji artifacts before words at start of line or bullet (e.g. '@ Copy', 'W@ Copy', '€ Translate', 'xs Pin', '© Copy', '® Save')
-            result.replace(QRegularExpression(QStringLiteral("(^|\\n|(?:•\\s+))(?:W@|@|€|xs|©|®|¢|¥|§|¶|~|\\|)\\s*(?=[A-Z\\p{Lu}])")), QStringLiteral("\\1"));
-            // 3. Remove leading noise prefix symbols on isolated words like '@Copy' -> 'Copy'
-            result.replace(QRegularExpression(QStringLiteral("(^|\\s)[@©®¢¥~|](?=[A-Za-z\\p{L}]{2,})")), QStringLiteral("\\1"));
-            // 4. Clean up trailing OCR noise characters
-            result.replace(QRegularExpression(QStringLiteral("[|~_]+(\\n|$)")), QStringLiteral("\\1"));
-
-            // 5. Extract structured word and line bounding boxes for interactive UI overlay
+            // 5. Extract structured words and lines with synchronized emoji replacement
             QVector<QRect> lineBoxes;
             QStringList lines;
             QVector<QRect> wordBoxes;
             QStringList words;
 
-            // Helper to detect colored UI emojis from screenshot
-            auto detectEmojiInBox = [&](const QRect& bBox) -> QString {
-                QRect r = bBox.intersected(srcImg.rect());
-                if (r.width() < 6 || r.height() < 6) return QString();
-                int totalColored = 0, redCount = 0, yellowCount = 0, blueCount = 0, greenCount = 0;
-                for (int y = r.y(); y <= r.bottom(); ++y) {
-                    const QRgb* line = reinterpret_cast<const QRgb*>(srcImg.constScanLine(y));
-                    for (int x = r.x(); x <= r.right(); ++x) {
-                        QColor c(line[x]);
-                        if (c.hsvSaturation() >= 80 && c.value() >= 60) {
-                            totalColored++;
-                            int h = c.hsvHue();
-                            if (h >= 330 || h <= 20) redCount++;
-                            else if (h >= 28 && h <= 65) yellowCount++;
-                            else if (h >= 180 && h <= 250) blueCount++;
-                            else if (h >= 80 && h <= 155) greenCount++;
-                        }
-                    }
-                }
-                int area = r.width() * r.height();
-                if (totalColored >= 15 && totalColored >= area * 0.06) {
-                    if (redCount >= totalColored * 0.40) return QStringLiteral("❤️");
-                    if (yellowCount >= totalColored * 0.35) return QStringLiteral("👍");
-                    if (blueCount >= totalColored * 0.40) return QStringLiteral("🔗");
-                    if (greenCount >= totalColored * 0.40) return QStringLiteral("✅");
-                }
-                return QString();
-            };
-
             tesseract::ResultIterator* ri = api->GetIterator();
             if (ri) {
-                // Line extraction
                 do {
-                    const char* lText = ri->GetUTF8Text(tesseract::RIL_TEXTLINE);
-                    if (lText) {
-                        QString lStr = QString::fromUtf8(lText).trimmed();
-                        delete[] lText;
-                        // Clean emoji artifacts on line level
-                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\n)[e◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}])")), QStringLiteral("\\1• "));
-                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\n|(?:•\\s+))(?:W@|@|€|xs|©|®|¢|¥|§|¶|~|\\|)\\s*(?=[A-Z\\p{Lu}])")), QStringLiteral("\\1"));
-                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\s)[@©®¢¥~|](?=[A-Za-z\\p{L}]{2,})")), QStringLiteral("\\1"));
-                        lStr = lStr.trimmed();
-                        if (!lStr.isEmpty()) {
-                            int x1, y1, x2, y2;
-                            ri->BoundingBox(tesseract::RIL_TEXTLINE, &x1, &y1, &x2, &y2);
-                            int bx = qRound(x1 / scaleFactor);
-                            int by = qRound(y1 / scaleFactor);
-                            int bw = qMax(1, qRound((x2 - x1) / scaleFactor));
-                            int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
-                            QRect lRect(bx, by, bw, bh);
+                    // Extract line and its constituent words
+                    QVector<QRect> curLineWordBoxes;
+                    QStringList curLineWords;
+                    int lx1 = 0, ly1 = 0, lx2 = 0, ly2 = 0;
+                    ri->BoundingBox(tesseract::RIL_TEXTLINE, &lx1, &ly1, &lx2, &ly2);
 
-                            // Detect emoji on line tail or in line box
-                            QString emoji = detectEmojiInBox(lRect);
-                            if (!emoji.isEmpty()) {
-                                if (lStr.endsWith(QStringLiteral(" Y")) || lStr.endsWith(QStringLiteral(" の")) || lStr.endsWith(QStringLiteral(" ول"))) {
-                                    lStr.chop(2);
-                                    lStr.append(QStringLiteral(" ") + emoji);
-                                }
-                            }
-
-                            lineBoxes.append(lRect);
-                            lines.append(lStr);
-                        }
-                    }
-                } while (ri->Next(tesseract::RIL_TEXTLINE));
-
-                // Word extraction
-                ri = api->GetIterator();
-                if (ri) {
                     do {
                         const char* wText = ri->GetUTF8Text(tesseract::RIL_WORD);
                         if (wText) {
@@ -691,35 +640,50 @@ void Flameshot::exportCapture(const QPixmap& capture,
                             delete[] wText;
                             wStr.replace(QRegularExpression(QStringLiteral("^[@©®¢¥~|](?=[A-Za-z\\p{L}])")), QString());
                             wStr = wStr.trimmed();
-                            if (!wStr.isEmpty()) {
-                                int x1, y1, x2, y2;
-                                ri->BoundingBox(tesseract::RIL_WORD, &x1, &y1, &x2, &y2);
-                                int bx = qRound(x1 / scaleFactor);
-                                int by = qRound(y1 / scaleFactor);
-                                int bw = qMax(1, qRound((x2 - x1) / scaleFactor));
-                                int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
-                                QRect wRect(bx, by, bw, bh);
 
-                                QString emoji = detectEmojiInBox(wRect);
-                                if (!emoji.isEmpty() && (wStr.size() <= 2 || wStr == QStringLiteral("Y") || wStr == QStringLiteral("の") || wStr == QStringLiteral("ول"))) {
+                            int x1, y1, x2, y2;
+                            ri->BoundingBox(tesseract::RIL_WORD, &x1, &y1, &x2, &y2);
+                            int bx = qRound(x1 / scaleFactor);
+                            int by = qRound(y1 / scaleFactor);
+                            int bw = qMax(1, qRound((x2 - x1) / scaleFactor));
+                            int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
+                            QRect wRect(bx, by, bw, bh);
+
+                            // Detect if this word box is a colored emoji
+                            QString emoji = detectEmojiInBox(wRect);
+                            if (!emoji.isEmpty()) {
+                                if (wStr.size() <= 3 || wStr == QStringLiteral("Y") || wStr == QStringLiteral("の") || wStr == QStringLiteral("ول") || wStr == QStringLiteral("J") || wStr == QStringLiteral("4")) {
                                     wStr = emoji;
                                 }
+                            }
 
+                            if (!wStr.isEmpty()) {
                                 wordBoxes.append(wRect);
                                 words.append(wStr);
+                                curLineWordBoxes.append(wRect);
+                                curLineWords.append(wStr);
                             }
                         }
-                    } while (ri->Next(tesseract::RIL_WORD));
-                }
+                    } while (!ri->IsAtFinalElement(tesseract::RIL_TEXTLINE, tesseract::RIL_WORD) && ri->Next(tesseract::RIL_WORD));
+
+                    if (!curLineWords.isEmpty()) {
+                        int bx = qRound(lx1 / scaleFactor);
+                        int by = qRound(ly1 / scaleFactor);
+                        int bw = qMax(1, qRound((lx2 - lx1) / scaleFactor));
+                        int bh = qMax(1, qRound((ly2 - ly1) / scaleFactor));
+                        lineBoxes.append(QRect(bx, by, bw, bh));
+
+                        QString lStr = curLineWords.join(QStringLiteral(" "));
+                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\n)[e◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}])")), QStringLiteral("\\1• "));
+                        lines.append(lStr);
+                    }
+                } while (ri->Next(tesseract::RIL_TEXTLINE));
             }
 
             api->End();
             delete api;
 
-            // Normalize result with cleaned lines
-            if (!lines.isEmpty()) {
-                result = lines.join(QStringLiteral("\n"));
-            }
+            QString result = lines.join(QStringLiteral("\n"));
 
             if (!result.isEmpty()) {
                 FlameshotDaemon::copyToClipboard(result, tr("Text extracted and copied to clipboard."));
