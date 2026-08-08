@@ -1,6 +1,9 @@
 #include "flameshotdaemon.h"
 #include "core/flameshot.h"
 #include "tools/pin/pinwidget.h"
+#ifdef ENABLE_OCR
+#include "tools/ocr/ocrwidget.h"
+#endif
 #include "utils/abstractlogger.h"
 #include "utils/confighandler.h"
 #include "utils/globalvalues.h"
@@ -128,11 +131,86 @@ void FlameshotDaemon::createPin(const QPixmap& capture, QRect geometry)
     kdsa.sendMessage(data);
 #else
     stream << capture << geometry;
-    QDBusMessage m = createMethodCall(QStringLiteral("attachPin"));
-    m << data;
-    call(m);
+    QDBusConnection sessionBus = QDBusConnection::sessionBus();
+    if (sessionBus.isConnected()) {
+        QDBusMessage m = createMethodCall(QStringLiteral("attachPin"));
+        m << data;
+        QDBusMessage reply = sessionBus.call(m);
+        if (reply.type() != QDBusMessage::ErrorMessage) {
+            return;
+        }
+    }
 #endif
+
+    // Standalone fallback: when no daemon is active, show pin widget directly in the GUI process
+    if (Flameshot::instance()) {
+        Flameshot::instance()->setExternalWidget(true);
+    }
+    auto* pinWidget = new PinWidget(capture, geometry);
+    QObject::connect(pinWidget, &QObject::destroyed, []() {
+        if (Flameshot::instance()) {
+            Flameshot::instance()->setExternalWidget(false);
+        }
+        if (FlameshotDaemon::instance() == nullptr) {
+            qApp->quit();
+        }
+    });
+    pinWidget->show();
+    pinWidget->activateWindow();
 }
+
+#ifdef ENABLE_OCR
+void FlameshotDaemon::createOcr(const QPixmap& capture,
+                                const QRect& geometry,
+                                const QString& fullText,
+                                const QVector<QRect>& wordBoxes,
+                                const QStringList& words,
+                                const QVector<QRect>& lineBoxes,
+                                const QStringList& lines)
+{
+    if (instance()) {
+        instance()->attachOcr(capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+        return;
+    }
+
+    QByteArray data;
+    QDataStream stream(&data, QIODevice::WriteOnly);
+
+#if defined(USE_KDSINGLEAPPLICATION) &&                                        \
+  (defined(Q_OS_MACOS) || defined(Q_OS_WIN))
+    auto kdsa = KDSingleApplication(QStringLiteral("org.flameshot.Flameshot"));
+    stream << QStringLiteral("attachOcr") << capture << geometry << fullText << wordBoxes << words << lineBoxes << lines;
+    kdsa.sendMessage(data);
+#else
+    stream << capture << geometry << fullText << wordBoxes << words << lineBoxes << lines;
+    QDBusConnection sessionBus = QDBusConnection::sessionBus();
+    if (sessionBus.isConnected()) {
+        QDBusMessage m = createMethodCall(QStringLiteral("attachOcr"));
+        m << data;
+        QDBusMessage reply = sessionBus.call(m);
+        if (reply.type() != QDBusMessage::ErrorMessage) {
+            return;
+        }
+    }
+#endif
+
+    // Standalone fallback: when no daemon is active, show OCR widget directly in the GUI process
+    if (Flameshot::instance()) {
+        Flameshot::instance()->setExternalWidget(true);
+    }
+    auto* ocrWidget = new OcrWidget(capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+    QObject::connect(ocrWidget, &QObject::destroyed, []() {
+        if (Flameshot::instance()) {
+            Flameshot::instance()->setExternalWidget(false);
+        }
+        if (FlameshotDaemon::instance() == nullptr) {
+            qApp->quit();
+        }
+    });
+    ocrWidget->show();
+    ocrWidget->activateWindow();
+}
+#endif
 
 void FlameshotDaemon::copyToClipboard(const QPixmap& capture)
 {
@@ -310,6 +388,27 @@ void FlameshotDaemon::attachPin(const QPixmap& pixmap, QRect geometry)
     pinWidget->activateWindow();
 }
 
+#ifdef ENABLE_OCR
+void FlameshotDaemon::attachOcr(const QPixmap& capture,
+                                const QRect& geometry,
+                                const QString& fullText,
+                                const QVector<QRect>& wordBoxes,
+                                const QStringList& words,
+                                const QVector<QRect>& lineBoxes,
+                                const QStringList& lines)
+{
+    auto* ocrWidget = new OcrWidget(capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+    m_widgets.append(ocrWidget);
+    connect(ocrWidget, &QObject::destroyed, this, [=, this]() {
+        m_widgets.removeOne(ocrWidget);
+        quitIfIdle();
+    });
+
+    ocrWidget->show();
+    ocrWidget->activateWindow();
+}
+#endif
+
 void FlameshotDaemon::attachScreenshotToClipboard(const QPixmap& pixmap)
 {
     m_hostingClipboard = true;
@@ -335,6 +434,24 @@ void FlameshotDaemon::attachPin(const QByteArray& data)
 
     attachPin(pixmap, geometry);
 }
+
+#ifdef ENABLE_OCR
+void FlameshotDaemon::attachOcr(const QByteArray& data)
+{
+    QDataStream stream(data);
+    QPixmap pixmap;
+    QRect geometry;
+    QString fullText;
+    QVector<QRect> wordBoxes;
+    QStringList words;
+    QVector<QRect> lineBoxes;
+    QStringList lines;
+
+    stream >> pixmap >> geometry >> fullText >> wordBoxes >> words >> lineBoxes >> lines;
+
+    attachOcr(pixmap, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+}
+#endif
 
 void FlameshotDaemon::attachScreenshotToClipboard(const QByteArray& screenshot)
 {
@@ -506,6 +623,22 @@ void FlameshotDaemon::messageReceivedFromSecondaryInstance(
             qWarning() << "Received \"attachTextToClipboard\" from second "
                           "instance, but text is empty!";
         }
+#ifdef ENABLE_OCR
+    } else if (methodCall == QStringLiteral("attachOcr")) {
+        QPixmap capture;
+        QRect geometry;
+        QString fullText;
+        QVector<QRect> wordBoxes;
+        QStringList words;
+        QVector<QRect> lineBoxes;
+        QStringList lines;
+        stream >> capture >> geometry >> fullText >> wordBoxes >> words >> lineBoxes >> lines;
+        if (!capture.isNull() || !fullText.isEmpty()) {
+            FlameshotDaemon::instance()->attachOcr(capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+        } else {
+            qWarning() << "Received \"attachOcr\" from second instance, but data is empty!";
+        }
+#endif
     } else {
         qWarning() << "Received unknown message from second instance:"
                    << message;

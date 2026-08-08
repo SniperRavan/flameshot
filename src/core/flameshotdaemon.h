@@ -27,6 +27,15 @@ public:
     static void start();
     static FlameshotDaemon* instance();
     static void createPin(const QPixmap& capture, QRect geometry);
+#ifdef ENABLE_OCR
+    static void createOcr(const QPixmap& capture,
+                          const QRect& geometry,
+                          const QString& fullText,
+                          const QVector<QRect>& wordBoxes,
+                          const QStringList& words,
+                          const QVector<QRect>& lineBoxes,
+                          const QStringList& lines);
+#endif
     static void copyToClipboard(const QPixmap& capture);
     static void copyToClipboard(const QString& text,
                                 const QString& notification = "");
@@ -62,6 +71,16 @@ private:
     FlameshotDaemon();
     void quitIfIdle();
     void attachPin(const QPixmap& pixmap, QRect geometry);
+#ifdef ENABLE_OCR
+    void attachOcr(const QPixmap& capture,
+                   const QRect& geometry,
+                   const QString& fullText,
+                   const QVector<QRect>& wordBoxes,
+                   const QStringList& words,
+                   const QVector<QRect>& lineBoxes,
+                   const QStringList& lines);
+    void attachOcr(const QByteArray& data);
+#endif
     void attachScreenshotToClipboard(const QPixmap& pixmap);
 
     void attachPin(const QByteArray& data);
