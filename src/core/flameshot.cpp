@@ -587,21 +587,23 @@ void Flameshot::exportCapture(const QPixmap& capture,
             // Helper to detect colored UI emojis in any bounding box
             auto detectEmojiInBox = [&](const QRect& bBox) -> QString {
                 QRect r = bBox.intersected(srcImg.rect());
-                if (r.width() < 5 || r.height() < 5) return QString();
-                int totalColored = 0, redCount = 0, yellowCount = 0, blueCount = 0, greenCount = 0, darkRedCount = 0;
+                if (r.width() < 8 || r.height() < 8) return QString();
+                // Emojis are square or nearly square standalone icons
+                qreal aspect = static_cast<qreal>(r.width()) / qMax(1, r.height());
+                if (aspect > 1.45 || aspect < 0.65) return QString(); // Regular text words like "to", "CPU", "code" are NOT emojis
+
+                int totalColored = 0, redCount = 0, yellowCount = 0, greenCount = 0;
                 for (int y = r.y(); y <= r.bottom(); ++y) {
                     const QRgb* line = reinterpret_cast<const QRgb*>(srcImg.constScanLine(y));
                     for (int x = r.x(); x <= r.right(); ++x) {
                         QColor c(line[x]);
-                        if (c.hsvSaturation() >= 60 && c.value() >= 45) {
+                        if (c.hsvSaturation() >= 85 && c.value() >= 55) {
                             totalColored++;
                             int h = c.hsvHue();
-                            if (h >= 325 || h <= 18) {
+                            if (h >= 330 || h <= 18) {
                                 redCount++;
-                            } else if (h >= 24 && h <= 68) {
+                            } else if (h >= 26 && h <= 62) {
                                 yellowCount++;
-                            } else if (h >= 180 && h <= 250) {
-                                blueCount++;
                             } else if (h >= 80 && h <= 155) {
                                 greenCount++;
                             }
@@ -609,11 +611,10 @@ void Flameshot::exportCapture(const QPixmap& capture,
                     }
                 }
                 int area = r.width() * r.height();
-                if (totalColored >= 10 && totalColored >= area * 0.05) {
-                    if (redCount >= totalColored * 0.35) return QStringLiteral("❤️");
-                    if (yellowCount >= totalColored * 0.35) return QStringLiteral("👍");
-                    if (blueCount >= totalColored * 0.35) return QStringLiteral("🔗");
-                    if (greenCount >= totalColored * 0.35) return QStringLiteral("✅");
+                if (totalColored >= 18 && totalColored >= area * 0.12) {
+                    if (redCount >= totalColored * 0.45) return QStringLiteral("❤️");
+                    if (yellowCount >= totalColored * 0.45) return QStringLiteral("👍");
+                    if (greenCount >= totalColored * 0.45) return QStringLiteral("✅");
                 }
                 return QString();
             };
@@ -639,6 +640,9 @@ void Flameshot::exportCapture(const QPixmap& capture,
                             QString wStr = QString::fromUtf8(wText).trimmed();
                             delete[] wText;
                             wStr.replace(QRegularExpression(QStringLiteral("^[@©®¢¥~|](?=[A-Za-z\\p{L}])")), QString());
+                            // Fix @ confused with 0 in numbers like @.2s -> 0.2s
+                            wStr.replace(QRegularExpression(QStringLiteral("@(?=[0-9])")), QStringLiteral("0"));
+                            wStr.replace(QRegularExpression(QStringLiteral("(?<=[0-9])@")), QStringLiteral("0"));
                             wStr = wStr.trimmed();
 
                             int x1, y1, x2, y2;
@@ -649,10 +653,10 @@ void Flameshot::exportCapture(const QPixmap& capture,
                             int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
                             QRect wRect(bx, by, bw, bh);
 
-                            // Detect if this word box is a colored emoji
+                            // Detect if this word box is a genuine colored emoji (only replace single misrecognized noise glyphs)
                             QString emoji = detectEmojiInBox(wRect);
                             if (!emoji.isEmpty()) {
-                                if (wStr.size() <= 3 || wStr == QStringLiteral("Y") || wStr == QStringLiteral("の") || wStr == QStringLiteral("ول") || wStr == QStringLiteral("J") || wStr == QStringLiteral("4")) {
+                                if (wStr == QStringLiteral("Y") || wStr == QStringLiteral("の") || wStr == QStringLiteral("ول") || wStr == QStringLiteral("J") || wStr == QStringLiteral("4") || wStr == QStringLiteral("€") || wStr == QStringLiteral("å")) {
                                     wStr = emoji;
                                 }
                             }
@@ -674,7 +678,8 @@ void Flameshot::exportCapture(const QPixmap& capture,
                         lineBoxes.append(QRect(bx, by, bw, bh));
 
                         QString lStr = curLineWords.join(QStringLiteral(" "));
-                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\n)[e◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}])")), QStringLiteral("\\1• "));
+                        // Fix bullet points (including Bengali 'ও' misread as bullet point in Latin lists)
+                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\n)[ওe◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}#])")), QStringLiteral("\\1• "));
                         lines.append(lStr);
                     }
                 } while (ri->Next(tesseract::RIL_TEXTLINE));
