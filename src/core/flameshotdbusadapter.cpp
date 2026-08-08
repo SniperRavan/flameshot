@@ -31,3 +31,10 @@ void FlameshotDBusAdapter::attachPin(const QByteArray& data)
 {
     FlameshotDaemon::instance()->attachPin(data);
 }
+
+#ifdef ENABLE_OCR
+void FlameshotDBusAdapter::attachOcr(const QByteArray& data)
+{
+    FlameshotDaemon::instance()->attachOcr(data);
+}
+#endif
