@@ -56,7 +56,12 @@ target_sources(
           text/texttool.cpp
           text/textwidget.cpp)
 target_sources(flameshot PRIVATE undo/undotool.h undo/undotool.cpp)
-target_sources(flameshot PRIVATE ocr/ocrtool.h ocr/ocrtool.cpp)
+target_sources(
+  flameshot
+  PRIVATE ocr/ocrtool.h
+          ocr/ocrwidget.h
+          ocr/ocrtool.cpp
+          ocr/ocrwidget.cpp)
 
 target_sources(
   flameshot
