@@ -544,9 +544,37 @@ void Flameshot::exportCapture(const QPixmap& capture,
             }
         }
 
-        // 4. Run Tesseract with optimized DPI and layout parameters
+        // 4. Detect installed multi-language models (e.g. English, Bengali, Hindi, Tamil, Asian, European)
+        QStringList targetLangs = { "eng", "osd", "ben", "hin", "tam", "tel", "kan", "mal", "mar", "guj", "pan", "ara", "rus", "deu", "fra", "spa", "ita", "chi_sim", "jpn", "kor" };
+        QStringList activeLangs;
+        const QStringList searchDirs = {
+            QStringLiteral("/usr/share/tesseract-ocr/5/tessdata/"),
+            QStringLiteral("/usr/share/tesseract-ocr/4.00/tessdata/"),
+            QStringLiteral("/usr/share/tessdata/")
+        };
+        for (const QString& l : targetLangs) {
+            for (const QString& dir : searchDirs) {
+                if (QFile::exists(dir + l + QStringLiteral(".traineddata"))) {
+                    if (!activeLangs.contains(l)) {
+                        activeLangs.append(l);
+                    }
+                    break;
+                }
+            }
+        }
+        if (activeLangs.isEmpty()) {
+            activeLangs.append(QStringLiteral("eng"));
+        }
+        QByteArray langBytes = activeLangs.join(QStringLiteral("+")).toUtf8();
+
         auto* api = new tesseract::TessBaseAPI();
-        if (api->Init(nullptr, "eng") == 0) {
+        int initStatus = api->Init(nullptr, langBytes.constData());
+        if (initStatus != 0) {
+            // Fallback to English if combined multi-language loading fails
+            initStatus = api->Init(nullptr, "eng");
+        }
+
+        if (initStatus == 0) {
             api->SetVariable("load_system_dawg", "0");
             api->SetVariable("load_freq_dawg", "0");
             api->SetVariable("user_defined_dpi", "300");
@@ -570,10 +598,16 @@ void Flameshot::exportCapture(const QPixmap& capture,
                 delete[] outText;
             }
 
-            // Post-process bullet points and formatting
-            result.replace(QRegularExpression("(^|\\n)[e◦o°*+•] (?=[A-Z])"), "\\1• ");
-            // Clean up standalone emoji/icon misrecognition artifacts at start of lines (e.g. '@ Copy' -> 'Copy')
-            result.replace(QRegularExpression("(^|\\n)(?:W@|@|€|xs|©|®|¢)\\s+(?=[A-Z])"), "\\1");
+            // Smart regex post-processing:
+            // 1. Normalize line-leading bullet points
+            result.replace(QRegularExpression(QStringLiteral("(^|\\n)[e◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}])")), QStringLiteral("\\1• "));
+            // 2. Clean up common misrecognized emoji artifacts before words at start of line or bullet (e.g. '@ Copy', 'W@ Copy', '€ Translate', 'xs Pin', '© Copy', '® Save')
+            result.replace(QRegularExpression(QStringLiteral("(^|\\n|(?:•\\s+))(?:W@|@|€|xs|©|®|¢|¥|§|¶|~|\\|)\\s*(?=[A-Z\\p{Lu}])")), QStringLiteral("\\1"));
+            // 3. Remove leading noise prefix symbols on isolated words like '@Copy' -> 'Copy'
+            result.replace(QRegularExpression(QStringLiteral("(^|\\s)[@©®¢¥~|](?=[A-Za-z\\p{L}]{2,})")), QStringLiteral("\\1"));
+            // 4. Clean up trailing OCR noise characters
+            result.replace(QRegularExpression(QStringLiteral("[|~_]+(\\n|$)")), QStringLiteral("\\1"));
+            result = result.trimmed();
 
             // 5. Extract structured word and line bounding boxes for interactive UI overlay
             QVector<QRect> lineBoxes;
@@ -589,6 +623,11 @@ void Flameshot::exportCapture(const QPixmap& capture,
                     if (lText) {
                         QString lStr = QString::fromUtf8(lText).trimmed();
                         delete[] lText;
+                        // Clean emoji artifacts on line level
+                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\n)[e◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}])")), QStringLiteral("\\1• "));
+                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\n|(?:•\\s+))(?:W@|@|€|xs|©|®|¢|¥|§|¶|~|\\|)\\s*(?=[A-Z\\p{Lu}])")), QStringLiteral("\\1"));
+                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\s)[@©®¢¥~|](?=[A-Za-z\\p{L}]{2,})")), QStringLiteral("\\1"));
+                        lStr = lStr.trimmed();
                         if (!lStr.isEmpty()) {
                             int x1, y1, x2, y2;
                             ri->BoundingBox(tesseract::RIL_TEXTLINE, &x1, &y1, &x2, &y2);
@@ -610,6 +649,8 @@ void Flameshot::exportCapture(const QPixmap& capture,
                         if (wText) {
                             QString wStr = QString::fromUtf8(wText).trimmed();
                             delete[] wText;
+                            wStr.replace(QRegularExpression(QStringLiteral("^[@©®¢¥~|](?=[A-Za-z\\p{L}])")), QString());
+                            wStr = wStr.trimmed();
                             if (!wStr.isEmpty()) {
                                 int x1, y1, x2, y2;
                                 ri->BoundingBox(tesseract::RIL_WORD, &x1, &y1, &x2, &y2);
