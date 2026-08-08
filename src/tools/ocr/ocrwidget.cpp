@@ -32,11 +32,12 @@
 #include <QToolTip>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 #ifdef ENABLE_OCR
 
 // ============================================================================
-// OcrCanvas Implementation
+// OcrCanvas Implementation (Interactive Preview + Zoom + Highlights)
 // ============================================================================
 
 OcrCanvas::OcrCanvas(const QPixmap& pixmap,
@@ -101,17 +102,43 @@ QString OcrCanvas::selectedText() const
     return sel.join(QStringLiteral(" "));
 }
 
+void OcrCanvas::zoomIn()
+{
+    setZoomFactor(m_zoomFactor * 1.25);
+}
+
+void OcrCanvas::zoomOut()
+{
+    setZoomFactor(m_zoomFactor / 1.25);
+}
+
+void OcrCanvas::zoomFit()
+{
+    m_panOffset = QPoint(0, 0);
+    setZoomFactor(1.0);
+}
+
+void OcrCanvas::setZoomFactor(qreal factor)
+{
+    qreal newZoom = qBound(0.2, factor, 6.0);
+    if (!qFuzzyCompare(m_zoomFactor, newZoom)) {
+        m_zoomFactor = newZoom;
+        emit zoomChanged(m_zoomFactor);
+        update();
+    }
+}
+
 QRect OcrCanvas::mapToCanvas(const QRect& r) const
 {
     if (m_pixmap.isNull() || width() <= 0 || height() <= 0) {
         return QRect();
     }
-    const qreal scaleX = static_cast<qreal>(width()) / m_pixmap.width();
-    const qreal scaleY = static_cast<qreal>(height()) / m_pixmap.height();
-    const qreal scale = qMin(scaleX, scaleY);
+    const qreal baseScaleX = static_cast<qreal>(width()) / m_pixmap.width();
+    const qreal baseScaleY = static_cast<qreal>(height()) / m_pixmap.height();
+    const qreal scale = qMin(baseScaleX, baseScaleY) * m_zoomFactor;
 
-    const qreal offX = (width() - m_pixmap.width() * scale) / 2.0;
-    const qreal offY = (height() - m_pixmap.height() * scale) / 2.0;
+    const qreal offX = (width() - m_pixmap.width() * scale) / 2.0 + m_panOffset.x();
+    const qreal offY = (height() - m_pixmap.height() * scale) / 2.0 + m_panOffset.y();
 
     return QRect(qRound(offX + r.x() * scale),
                  qRound(offY + r.y() * scale),
@@ -124,16 +151,16 @@ QRect OcrCanvas::mapFromCanvas(const QRect& r) const
     if (m_pixmap.isNull() || width() <= 0 || height() <= 0) {
         return QRect();
     }
-    const qreal scaleX = static_cast<qreal>(width()) / m_pixmap.width();
-    const qreal scaleY = static_cast<qreal>(height()) / m_pixmap.height();
-    const qreal scale = qMin(scaleX, scaleY);
+    const qreal baseScaleX = static_cast<qreal>(width()) / m_pixmap.width();
+    const qreal baseScaleY = static_cast<qreal>(height()) / m_pixmap.height();
+    const qreal scale = qMin(baseScaleX, baseScaleY) * m_zoomFactor;
 
     if (scale <= 0.0) {
         return QRect();
     }
 
-    const qreal offX = (width() - m_pixmap.width() * scale) / 2.0;
-    const qreal offY = (height() - m_pixmap.height() * scale) / 2.0;
+    const qreal offX = (width() - m_pixmap.width() * scale) / 2.0 + m_panOffset.x();
+    const qreal offY = (height() - m_pixmap.height() * scale) / 2.0 + m_panOffset.y();
 
     return QRect(qRound((r.x() - offX) / scale),
                  qRound((r.y() - offY) / scale),
@@ -166,21 +193,24 @@ void OcrCanvas::paintEvent(QPaintEvent*)
         return;
     }
 
-    const qreal scaleX = static_cast<qreal>(width()) / m_pixmap.width();
-    const qreal scaleY = static_cast<qreal>(height()) / m_pixmap.height();
-    const qreal scale = qMin(scaleX, scaleY);
+    const qreal baseScaleX = static_cast<qreal>(width()) / m_pixmap.width();
+    const qreal baseScaleY = static_cast<qreal>(height()) / m_pixmap.height();
+    const qreal scale = qMin(baseScaleX, baseScaleY) * m_zoomFactor;
 
     const int targetW = qRound(m_pixmap.width() * scale);
     const int targetH = qRound(m_pixmap.height() * scale);
-    const int offX = (width() - targetW) / 2;
-    const int offY = (height() - targetH) / 2;
+    const int offX = (width() - targetW) / 2 + m_panOffset.x();
+    const int offY = (height() - targetH) / 2 + m_panOffset.y();
     const QRect imgRect(offX, offY, targetW, targetH);
+
+    // Clip to canvas rect
+    p.setClipRect(rect());
 
     // Draw capture image
     p.drawPixmap(imgRect, m_pixmap);
 
     // Subtle dark overlay to let bounding boxes pop
-    p.fillRect(imgRect, QColor(0, 0, 0, 30));
+    p.fillRect(imgRect, QColor(0, 0, 0, 25));
 
     ConfigHandler conf;
     const QColor baseColor = conf.uiColor();
@@ -189,7 +219,7 @@ void OcrCanvas::paintEvent(QPaintEvent*)
         // Draw word boxes
         for (int i = 0; i < m_wordBoxes.size(); ++i) {
             QRect cRect = mapToCanvas(m_wordBoxes.at(i));
-            if (!cRect.isValid()) continue;
+            if (!cRect.isValid() || !rect().intersects(cRect)) continue;
 
             bool isSelected = m_selectedIndices.contains(i);
             bool isHovered = (i == m_hoveredIndex);
@@ -228,8 +258,27 @@ void OcrCanvas::paintEvent(QPaintEvent*)
     }
 }
 
+void OcrCanvas::wheelEvent(QWheelEvent* event)
+{
+    const int delta = event->angleDelta().y();
+    if (delta > 0) {
+        zoomIn();
+    } else if (delta < 0) {
+        zoomOut();
+    }
+    event->accept();
+}
+
 void OcrCanvas::mousePressEvent(QMouseEvent* event)
 {
+    if (event->button() == Qt::MiddleButton ||
+        (event->button() == Qt::LeftButton && (event->modifiers() & Qt::AltModifier))) {
+        m_isPanning = true;
+        m_panStart = event->pos() - m_panOffset;
+        setCursor(Qt::ClosedHandCursor);
+        return;
+    }
+
     if (event->button() == Qt::LeftButton) {
         m_selectionStart = event->pos();
         m_selectionCurrent = event->pos();
@@ -259,6 +308,12 @@ void OcrCanvas::mousePressEvent(QMouseEvent* event)
 
 void OcrCanvas::mouseMoveEvent(QMouseEvent* event)
 {
+    if (m_isPanning) {
+        m_panOffset = event->pos() - m_panStart;
+        update();
+        return;
+    }
+
     if (m_isSelecting) {
         m_selectionCurrent = event->pos();
         QRect selRect = QRect(m_selectionStart, m_selectionCurrent).normalized();
@@ -291,6 +346,10 @@ void OcrCanvas::mouseMoveEvent(QMouseEvent* event)
 
 void OcrCanvas::mouseReleaseEvent(QMouseEvent* event)
 {
+    if (m_isPanning) {
+        m_isPanning = false;
+        unsetCursor();
+    }
     if (event->button() == Qt::LeftButton && m_isSelecting) {
         m_isSelecting = false;
         update();
@@ -343,10 +402,15 @@ void OcrCanvas::contextMenuEvent(QContextMenuEvent* event)
             emit statusMessageRequested(tr("Copied %1 words to clipboard").arg(m_selectedIndices.size()));
         });
 
-        QAction* searchSelAct = menu.addAction(tr("Search Selected on Google"));
+        QAction* searchSelAct = menu.addAction(tr("Web Search Selected"));
         connect(searchSelAct, &QAction::triggered, this, [selText]() {
-            QUrl url(QStringLiteral("https://www.google.com/search?q=") + QUrl::toPercentEncoding(selText));
-            QDesktopServices::openUrl(url);
+            if (selText.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive) ||
+                selText.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
+                QDesktopServices::openUrl(QUrl(selText.trimmed()));
+            } else {
+                QUrl url(QStringLiteral("https://duckduckgo.com/?q=") + QUrl::toPercentEncoding(selText));
+                QDesktopServices::openUrl(url);
+            }
         });
 
         QAction* transSelAct = menu.addAction(tr("Translate Selected"));
@@ -357,6 +421,17 @@ void OcrCanvas::contextMenuEvent(QContextMenuEvent* event)
 
         menu.addSeparator();
     }
+
+    QAction* zoomInAct = menu.addAction(tr("Zoom In (Wheel Up)"));
+    connect(zoomInAct, &QAction::triggered, this, &OcrCanvas::zoomIn);
+
+    QAction* zoomOutAct = menu.addAction(tr("Zoom Out (Wheel Down)"));
+    connect(zoomOutAct, &QAction::triggered, this, &OcrCanvas::zoomOut);
+
+    QAction* zoomFitAct = menu.addAction(tr("Zoom Fit"));
+    connect(zoomFitAct, &QAction::triggered, this, &OcrCanvas::zoomFit);
+
+    menu.addSeparator();
 
     QAction* selectAllAct = menu.addAction(tr("Select All Words"));
     connect(selectAllAct, &QAction::triggered, this, &OcrCanvas::selectAllWords);
@@ -408,15 +483,15 @@ OcrWidget::OcrWidget(const QPixmap& pixmap,
     // Keyboard Shortcuts
     new QShortcut(QKeySequence(Qt::Key_Escape), this, SLOT(close()));
     new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q), this, SLOT(close()));
-    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this, SLOT(searchGoogle()));
-    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_T), this, SLOT(translateGoogle()));
+    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this, SLOT(searchWeb()));
+    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_T), this, SLOT(translateText()));
     new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_S), this, SLOT(saveToFile()));
 
     // Center on screen or near capture geometry
     QScreen* screen = QGuiAppCurrentScreen().currentScreen();
     QRect screenGeom = screen ? screen->geometry() : QRect(0, 0, 1920, 1080);
-    int targetW = qBound(680, qRound(screenGeom.width() * 0.55), 1100);
-    int targetH = qBound(460, qRound(screenGeom.height() * 0.55), 750);
+    int targetW = qBound(700, qRound(screenGeom.width() * 0.58), 1150);
+    int targetH = qBound(480, qRound(screenGeom.height() * 0.58), 780);
     resize(targetW, targetH);
 
     int posX = screenGeom.x() + (screenGeom.width() - targetW) / 2;
@@ -456,6 +531,10 @@ void OcrWidget::setupUi()
     m_statsBadge->setObjectName(QStringLiteral("statsBadge"));
     headerLayout->addWidget(m_statsBadge);
 
+    m_zoomBadge = new QLabel(QStringLiteral("100%"), this);
+    m_zoomBadge->setObjectName(QStringLiteral("zoomBadge"));
+    headerLayout->addWidget(m_zoomBadge);
+
     headerLayout->addStretch();
 
     auto* closeBtn = new QPushButton(QStringLiteral("✕"), this);
@@ -483,19 +562,64 @@ void OcrWidget::setupUi()
     });
 
     // ------------------------------------------------------------------------
-    // 3. Central Splitter (Visual Canvas + Text Panel)
+    // 3. Central Splitter (Visual Canvas with Zoom Toolbar + Text Panel)
     // ------------------------------------------------------------------------
     auto* splitter = new QSplitter(Qt::Horizontal, this);
     splitter->setObjectName(QStringLiteral("splitter"));
     splitter->setChildrenCollapsible(false);
 
-    // Left Pane: Visual Canvas
+    // Left Pane: Visual Canvas Container (with overlay zoom controls)
+    auto* canvasContainer = new QWidget(this);
+    auto* canvasLayout = new QVBoxLayout(canvasContainer);
+    canvasLayout->setContentsMargins(0, 0, 0, 0);
+    canvasLayout->setSpacing(4);
+
     m_canvas = new OcrCanvas(m_pixmap, m_wordBoxes, m_words, m_lineBoxes, m_lines, this);
     connect(m_canvas, &OcrCanvas::wordDoubleClicked, this, [this](const QString& w) {
         showToast(tr("Copied word: \"%1\"").arg(w));
     });
     connect(m_canvas, &OcrCanvas::statusMessageRequested, this, &OcrWidget::showToast);
-    splitter->addWidget(m_canvas);
+    connect(m_canvas, &OcrCanvas::zoomChanged, this, &OcrWidget::updateZoomBadge);
+    canvasLayout->addWidget(m_canvas, 1);
+
+    // Zoom toolbar directly under preview canvas
+    auto* zoomBarLayout = new QHBoxLayout();
+    zoomBarLayout->setSpacing(4);
+
+    auto* zoomOutBtn = new QPushButton(QStringLiteral("−"), this);
+    zoomOutBtn->setObjectName(QStringLiteral("zoomBtn"));
+    zoomOutBtn->setFixedSize(26, 22);
+    zoomOutBtn->setToolTip(tr("Zoom Out"));
+    connect(zoomOutBtn, &QPushButton::clicked, m_canvas, &OcrCanvas::zoomOut);
+
+    auto* zoom100Btn = new QPushButton(QStringLiteral("100%"), this);
+    zoom100Btn->setObjectName(QStringLiteral("zoomBtn"));
+    zoom100Btn->setFixedSize(48, 22);
+    zoom100Btn->setToolTip(tr("Reset Zoom (100%)"));
+    connect(zoom100Btn, &QPushButton::clicked, this, [this]() {
+        m_canvas->zoomFit();
+    });
+
+    auto* zoomInBtn = new QPushButton(QStringLiteral("+"), this);
+    zoomInBtn->setObjectName(QStringLiteral("zoomBtn"));
+    zoomInBtn->setFixedSize(26, 22);
+    zoomInBtn->setToolTip(tr("Zoom In"));
+    connect(zoomInBtn, &QPushButton::clicked, m_canvas, &OcrCanvas::zoomIn);
+
+    auto* zoomFitBtn = new QPushButton(tr("Fit"), this);
+    zoomFitBtn->setObjectName(QStringLiteral("zoomBtn"));
+    zoomFitBtn->setFixedSize(38, 22);
+    zoomFitBtn->setToolTip(tr("Fit to View"));
+    connect(zoomFitBtn, &QPushButton::clicked, m_canvas, &OcrCanvas::zoomFit);
+
+    zoomBarLayout->addWidget(zoomOutBtn);
+    zoomBarLayout->addWidget(zoom100Btn);
+    zoomBarLayout->addWidget(zoomInBtn);
+    zoomBarLayout->addWidget(zoomFitBtn);
+    zoomBarLayout->addStretch();
+
+    canvasLayout->addLayout(zoomBarLayout);
+    splitter->addWidget(canvasContainer);
 
     // Right Pane: Text Editor & Inspector
     auto* rightPanel = new QWidget(this);
@@ -581,18 +705,18 @@ void OcrWidget::setupUi()
     connect(copySelBtn, &QPushButton::clicked, this, &OcrWidget::copySelectedText);
     toolbarLayout->addWidget(copySelBtn);
 
-    auto* searchBtn = new QPushButton(tr("🔍 Google"), this);
+    auto* searchBtn = new QPushButton(tr("🔍 Web Search"), this);
     searchBtn->setObjectName(QStringLiteral("actionBtn"));
     searchBtn->setCursor(Qt::PointingHandCursor);
-    searchBtn->setToolTip(tr("Search on Google (Ctrl+G)"));
-    connect(searchBtn, &QPushButton::clicked, this, &OcrWidget::searchGoogle);
+    searchBtn->setToolTip(tr("Search on default web browser (Ctrl+G)"));
+    connect(searchBtn, &QPushButton::clicked, this, &OcrWidget::searchWeb);
     toolbarLayout->addWidget(searchBtn);
 
     auto* transBtn = new QPushButton(tr("🌐 Translate"), this);
     transBtn->setObjectName(QStringLiteral("actionBtn"));
     transBtn->setCursor(Qt::PointingHandCursor);
-    transBtn->setToolTip(tr("Translate with Google Translate (Ctrl+T)"));
-    connect(transBtn, &QPushButton::clicked, this, &OcrWidget::translateGoogle);
+    transBtn->setToolTip(tr("Translate in web browser (Ctrl+T)"));
+    connect(transBtn, &QPushButton::clicked, this, &OcrWidget::translateText);
     toolbarLayout->addWidget(transBtn);
 
     auto* saveBtn = new QPushButton(tr("💾 Save .txt"), this);
@@ -647,7 +771,7 @@ void OcrWidget::applyTheme()
       "    font-size: 14px;"
       "    font-weight: bold;"
       "}"
-      "#statsBadge {"
+      "#statsBadge, #zoomBadge {"
       "    color: #abb2bf;"
       "    background-color: #282c34;"
       "    border: 1px solid #3e4451;"
@@ -686,13 +810,17 @@ void OcrWidget::applyTheme()
       "    border: 1px solid %1;"
       "    color: #ffffff;"
       "}"
-      "#fmtBtn, #lineBtn, #singleBtn {"
+      "#fmtBtn, #lineBtn, #singleBtn, #zoomBtn {"
       "    background-color: #282c34;"
       "    color: #abb2bf;"
       "    border: 1px solid #3e4451;"
       "    border-radius: 4px;"
-      "    padding: 4px 8px;"
+      "    padding: 2px 6px;"
       "    font-size: 11px;"
+      "}"
+      "#zoomBtn:hover {"
+      "    background-color: #3e4451;"
+      "    color: #ffffff;"
       "}"
       "#fmtBtn:checked, #lineBtn:checked, #singleBtn:checked {"
       "    background-color: %1;"
@@ -736,6 +864,13 @@ void OcrWidget::applyTheme()
       .arg(accentHex, accentRgba));
 }
 
+void OcrWidget::updateZoomBadge(qreal factor)
+{
+    if (m_zoomBadge) {
+        m_zoomBadge->setText(QStringLiteral("%1%").arg(qRound(factor * 100)));
+    }
+}
+
 void OcrWidget::showToast(const QString& message)
 {
     m_toastLabel->setText(message);
@@ -766,26 +901,39 @@ void OcrWidget::copySelectedText()
     }
 }
 
-void OcrWidget::searchGoogle()
+void OcrWidget::searchWeb()
 {
     QString txt = m_textEdit->textCursor().selectedText();
+    if (txt.isEmpty() && m_canvas) {
+        txt = m_canvas->selectedText();
+    }
     if (txt.isEmpty()) {
         txt = m_textEdit->toPlainText();
     }
+    txt = txt.trimmed();
     if (!txt.isEmpty()) {
-        QUrl url(QStringLiteral("https://www.google.com/search?q=") + QUrl::toPercentEncoding(txt.trimmed()));
-        QDesktopServices::openUrl(url);
+        if (txt.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive) ||
+            txt.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
+            QDesktopServices::openUrl(QUrl(txt));
+        } else {
+            QUrl url(QStringLiteral("https://duckduckgo.com/?q=") + QUrl::toPercentEncoding(txt));
+            QDesktopServices::openUrl(url);
+        }
     }
 }
 
-void OcrWidget::translateGoogle()
+void OcrWidget::translateText()
 {
     QString txt = m_textEdit->textCursor().selectedText();
+    if (txt.isEmpty() && m_canvas) {
+        txt = m_canvas->selectedText();
+    }
     if (txt.isEmpty()) {
         txt = m_textEdit->toPlainText();
     }
+    txt = txt.trimmed();
     if (!txt.isEmpty()) {
-        QUrl url(QStringLiteral("https://translate.google.com/?sl=auto&tl=en&text=") + QUrl::toPercentEncoding(txt.trimmed()));
+        QUrl url(QStringLiteral("https://translate.google.com/?sl=auto&tl=en&text=") + QUrl::toPercentEncoding(txt));
         QDesktopServices::openUrl(url);
     }
 }

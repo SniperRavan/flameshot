@@ -39,10 +39,17 @@ public:
     void clearSelection();
     QString selectedText() const;
 
+    void zoomIn();
+    void zoomOut();
+    void zoomFit();
+    void setZoomFactor(qreal factor);
+    qreal zoomFactor() const { return m_zoomFactor; }
+
 signals:
     void wordDoubleClicked(const QString& word);
     void selectionChanged();
     void statusMessageRequested(const QString& msg);
+    void zoomChanged(qreal factor);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -50,6 +57,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void leaveEvent(QEvent* event) override;
 
@@ -72,6 +80,11 @@ private:
     bool m_isSelecting{ false };
     QPoint m_selectionStart;
     QPoint m_selectionCurrent;
+
+    qreal m_zoomFactor{ 1.0 };
+    QPoint m_panOffset{ 0, 0 };
+    bool m_isPanning{ false };
+    QPoint m_panStart;
 };
 
 class OcrWidget : public QWidget
@@ -96,13 +109,14 @@ protected:
 private slots:
     void copyAllText();
     void copySelectedText();
-    void searchGoogle();
-    void translateGoogle();
+    void searchWeb();
+    void translateText();
     void saveToFile();
     void pinScreenshot();
     void showToast(const QString& message);
     void onSearchTextChanged(const QString& text);
     void setFormatMode(int mode);
+    void updateZoomBadge(qreal factor);
 
 private:
     void setupUi();
@@ -121,6 +135,7 @@ private:
     QLineEdit* m_searchBox{ nullptr };
     QLabel* m_toastLabel{ nullptr };
     QLabel* m_statsBadge{ nullptr };
+    QLabel* m_zoomBadge{ nullptr };
     QTimer* m_toastTimer{ nullptr };
     QGraphicsDropShadowEffect* m_shadowEffect{ nullptr };
 
