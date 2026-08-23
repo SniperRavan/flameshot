@@ -489,7 +489,8 @@ void Flameshot::exportCapture(const QPixmap& capture,
 
     if (tasks & CR::OCR) {
 #ifdef ENABLE_OCR
-        // 1. High-quality smooth scaling (2.5x - 3.0x) to optimize character resolution for Tesseract LSTM
+        // 1. High-quality smooth scaling (2.5x - 3.0x) to optimize character
+        // resolution for Tesseract LSTM
         QImage srcImg = capture.toImage();
         const int origWidth = srcImg.width();
         const int origHeight = srcImg.height();
@@ -503,7 +504,8 @@ void Flameshot::exportCapture(const QPixmap& capture,
 
         const int targetW = qMax(1, qRound(origWidth * scaleFactor));
         const int targetH = qMax(1, qRound(origHeight * scaleFactor));
-        QImage img = srcImg.scaled(targetW, targetH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QImage img = srcImg.scaled(
+          targetW, targetH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         img = img.convertToFormat(QImage::Format_Grayscale8);
 
         const int width = img.width();
@@ -518,13 +520,17 @@ void Flameshot::exportCapture(const QPixmap& capture,
             for (int x = 0; x < width; ++x) {
                 const uchar val = line[x];
                 globalSum += val;
-                if (val < minVal) minVal = val;
-                if (val > maxVal) maxVal = val;
+                if (val < minVal)
+                    minVal = val;
+                if (val > maxVal)
+                    maxVal = val;
             }
         }
-        const bool isLightBg = (globalSum / (static_cast<long long>(width) * height)) > 127;
+        const bool isLightBg =
+          (globalSum / (static_cast<long long>(width) * height)) > 127;
 
-        // 3. Normalize grayscale contrast and invert dark mode while preserving anti-aliased subpixel edges
+        // 3. Normalize grayscale contrast and invert dark mode while preserving
+        // anti-aliased subpixel edges
         QImage procImg(width, height, QImage::Format_Grayscale8);
         const int range = qMax(1, maxVal - minVal);
 
@@ -536,7 +542,8 @@ void Flameshot::exportCapture(const QPixmap& capture,
                 int norm = (v - minVal) * 255 / range;
                 norm = qBound(0, norm, 255);
                 if (!isLightBg) {
-                    // Dark mode: invert so text is dark on pure light background
+                    // Dark mode: invert so text is dark on pure light
+                    // background
                     dstLine[x] = static_cast<uchar>(255 - norm);
                 } else {
                     dstLine[x] = static_cast<uchar>(norm);
@@ -544,7 +551,8 @@ void Flameshot::exportCapture(const QPixmap& capture,
             }
         }
 
-        // 4. Fast, highly accurate primary multi-language loader (<0.2s execution)
+        // 4. Fast, highly accurate primary multi-language loader (<0.2s
+        // execution)
         QStringList targetLangs = { "eng", "ben", "hin", "osd" };
         QStringList activeLangs;
         const QStringList searchDirs = {
@@ -581,20 +589,30 @@ void Flameshot::exportCapture(const QPixmap& capture,
             api->SetVariable("preserve_interword_spaces", "1");
             api->SetPageSegMode(tesseract::PSM_AUTO);
 
-            api->SetImage(procImg.bits(), procImg.width(), procImg.height(), 1, procImg.bytesPerLine());
+            api->SetImage(procImg.bits(),
+                          procImg.width(),
+                          procImg.height(),
+                          1,
+                          procImg.bytesPerLine());
             api->Recognize(0);
 
             // Helper to detect colored UI emojis in any bounding box
             auto detectEmojiInBox = [&](const QRect& bBox) -> QString {
                 QRect r = bBox.intersected(srcImg.rect());
-                if (r.width() < 8 || r.height() < 8) return QString();
+                if (r.width() < 8 || r.height() < 8)
+                    return QString();
                 // Emojis are square or nearly square standalone icons
-                qreal aspect = static_cast<qreal>(r.width()) / qMax(1, r.height());
-                if (aspect > 1.45 || aspect < 0.65) return QString(); // Regular text words like "to", "CPU", "code" are NOT emojis
+                qreal aspect =
+                  static_cast<qreal>(r.width()) / qMax(1, r.height());
+                if (aspect > 1.45 || aspect < 0.65)
+                    return QString(); // Regular text words like "to", "CPU",
+                                      // "code" are NOT emojis
 
-                int totalColored = 0, redCount = 0, yellowCount = 0, greenCount = 0;
+                int totalColored = 0, redCount = 0, yellowCount = 0,
+                    greenCount = 0;
                 for (int y = r.y(); y <= r.bottom(); ++y) {
-                    const QRgb* line = reinterpret_cast<const QRgb*>(srcImg.constScanLine(y));
+                    const QRgb* line =
+                      reinterpret_cast<const QRgb*>(srcImg.constScanLine(y));
                     for (int x = r.x(); x <= r.right(); ++x) {
                         QColor c(line[x]);
                         if (c.hsvSaturation() >= 85 && c.value() >= 55) {
@@ -612,14 +630,18 @@ void Flameshot::exportCapture(const QPixmap& capture,
                 }
                 int area = r.width() * r.height();
                 if (totalColored >= 18 && totalColored >= area * 0.12) {
-                    if (redCount >= totalColored * 0.45) return QStringLiteral("❤️");
-                    if (yellowCount >= totalColored * 0.45) return QStringLiteral("👍");
-                    if (greenCount >= totalColored * 0.45) return QStringLiteral("✅");
+                    if (redCount >= totalColored * 0.45)
+                        return QStringLiteral("❤️");
+                    if (yellowCount >= totalColored * 0.45)
+                        return QStringLiteral("👍");
+                    if (greenCount >= totalColored * 0.45)
+                        return QStringLiteral("✅");
                 }
                 return QString();
             };
 
-            // 5. Extract structured words and lines with synchronized emoji replacement
+            // 5. Extract structured words and lines with synchronized emoji
+            // replacement
             QVector<QRect> lineBoxes;
             QStringList lines;
             QVector<QRect> wordBoxes;
@@ -632,31 +654,49 @@ void Flameshot::exportCapture(const QPixmap& capture,
                     QVector<QRect> curLineWordBoxes;
                     QStringList curLineWords;
                     int lx1 = 0, ly1 = 0, lx2 = 0, ly2 = 0;
-                    ri->BoundingBox(tesseract::RIL_TEXTLINE, &lx1, &ly1, &lx2, &ly2);
+                    ri->BoundingBox(
+                      tesseract::RIL_TEXTLINE, &lx1, &ly1, &lx2, &ly2);
 
                     do {
-                        const char* wText = ri->GetUTF8Text(tesseract::RIL_WORD);
+                        const char* wText =
+                          ri->GetUTF8Text(tesseract::RIL_WORD);
                         if (wText) {
                             QString wStr = QString::fromUtf8(wText).trimmed();
                             delete[] wText;
-                            wStr.replace(QRegularExpression(QStringLiteral("^[@©®¢¥~|](?=[A-Za-z\\p{L}])")), QString());
-                            // Fix @ confused with 0 in numbers like @.2s -> 0.2s
-                            wStr.replace(QRegularExpression(QStringLiteral("@(?=[0-9])")), QStringLiteral("0"));
-                            wStr.replace(QRegularExpression(QStringLiteral("(?<=[0-9])@")), QStringLiteral("0"));
+                            wStr.replace(QRegularExpression(QStringLiteral(
+                                           "^[@©®¢¥~|](?=[A-Za-z\\p{L}])")),
+                                         QString());
+                            // Fix @ confused with 0 in numbers like @.2s ->
+                            // 0.2s
+                            wStr.replace(
+                              QRegularExpression(QStringLiteral("@(?=[0-9])")),
+                              QStringLiteral("0"));
+                            wStr.replace(
+                              QRegularExpression(QStringLiteral("(?<=[0-9])@")),
+                              QStringLiteral("0"));
                             wStr = wStr.trimmed();
 
                             int x1, y1, x2, y2;
-                            ri->BoundingBox(tesseract::RIL_WORD, &x1, &y1, &x2, &y2);
+                            ri->BoundingBox(
+                              tesseract::RIL_WORD, &x1, &y1, &x2, &y2);
                             int bx = qRound(x1 / scaleFactor);
                             int by = qRound(y1 / scaleFactor);
                             int bw = qMax(1, qRound((x2 - x1) / scaleFactor));
                             int bh = qMax(1, qRound((y2 - y1) / scaleFactor));
                             QRect wRect(bx, by, bw, bh);
 
-                            // Detect if this word box is a genuine colored emoji (only replace single misrecognized noise glyphs)
+                            // Detect if this word box is a genuine colored
+                            // emoji (only replace single misrecognized noise
+                            // glyphs)
                             QString emoji = detectEmojiInBox(wRect);
                             if (!emoji.isEmpty()) {
-                                if (wStr == QStringLiteral("Y") || wStr == QStringLiteral("の") || wStr == QStringLiteral("ول") || wStr == QStringLiteral("J") || wStr == QStringLiteral("4") || wStr == QStringLiteral("€") || wStr == QStringLiteral("å")) {
+                                if (wStr == QStringLiteral("Y") ||
+                                    wStr == QStringLiteral("の") ||
+                                    wStr == QStringLiteral("ول") ||
+                                    wStr == QStringLiteral("J") ||
+                                    wStr == QStringLiteral("4") ||
+                                    wStr == QStringLiteral("€") ||
+                                    wStr == QStringLiteral("å")) {
                                     wStr = emoji;
                                 }
                             }
@@ -668,7 +708,9 @@ void Flameshot::exportCapture(const QPixmap& capture,
                                 curLineWords.append(wStr);
                             }
                         }
-                    } while (!ri->IsAtFinalElement(tesseract::RIL_TEXTLINE, tesseract::RIL_WORD) && ri->Next(tesseract::RIL_WORD));
+                    } while (!ri->IsAtFinalElement(tesseract::RIL_TEXTLINE,
+                                                   tesseract::RIL_WORD) &&
+                             ri->Next(tesseract::RIL_WORD));
 
                     if (!curLineWords.isEmpty()) {
                         int bx = qRound(lx1 / scaleFactor);
@@ -678,8 +720,12 @@ void Flameshot::exportCapture(const QPixmap& capture,
                         lineBoxes.append(QRect(bx, by, bw, bh));
 
                         QString lStr = curLineWords.join(QStringLiteral(" "));
-                        // Fix bullet points (including Bengali 'ও' misread as bullet point in Latin lists)
-                        lStr.replace(QRegularExpression(QStringLiteral("(^|\\n)[ওe◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}#])")), QStringLiteral("\\1• "));
+                        // Fix bullet points (including Bengali 'ও' misread as
+                        // bullet point in Latin lists)
+                        lStr.replace(
+                          QRegularExpression(QStringLiteral(
+                            "(^|\\n)[ওe◦o°*+•»›-]\\s+(?=[A-Za-z0-9\\p{L}#])")),
+                          QStringLiteral("\\1• "));
                         lines.append(lStr);
                     }
                 } while (ri->Next(tesseract::RIL_TEXTLINE));
@@ -691,8 +737,15 @@ void Flameshot::exportCapture(const QPixmap& capture,
             QString result = lines.join(QStringLiteral("\n"));
 
             if (!result.isEmpty()) {
-                FlameshotDaemon::copyToClipboard(result, tr("Text extracted and copied to clipboard."));
-                FlameshotDaemon::createOcr(capture, selection, result, wordBoxes, words, lineBoxes, lines);
+                FlameshotDaemon::copyToClipboard(
+                  result, tr("Text extracted and copied to clipboard."));
+                FlameshotDaemon::createOcr(capture,
+                                           selection,
+                                           result,
+                                           wordBoxes,
+                                           words,
+                                           lineBoxes,
+                                           lines);
             } else {
                 AbstractLogger::warning(AbstractLogger::Target::Notification)
                   << tr("OCR found no text in the selection.");

@@ -207,12 +207,14 @@ void OcrCanvas::paintEvent(QPaintEvent*)
         // Draw word boxes
         for (int i = 0; i < m_wordBoxes.size(); ++i) {
             QRect cRect = mapToCanvas(m_wordBoxes.at(i));
-            if (!cRect.isValid() || !rect().intersects(cRect)) continue;
+            if (!cRect.isValid() || !rect().intersects(cRect))
+                continue;
 
             bool isSelected = m_selectedIndices.contains(i);
             bool isHovered = (i == m_hoveredIndex);
-            bool isSearchMatch = (!m_filterQuery.isEmpty() &&
-                                  m_words.value(i).contains(m_filterQuery, Qt::CaseInsensitive));
+            bool isSearchMatch =
+              (!m_filterQuery.isEmpty() &&
+               m_words.value(i).contains(m_filterQuery, Qt::CaseInsensitive));
 
             QPainterPath path;
             path.addRoundedRect(cRect, 3, 3);
@@ -223,24 +225,41 @@ void OcrCanvas::paintEvent(QPaintEvent*)
                 p.strokePath(path, QPen(QColor(255, 235, 59), 2));
             } else if (isSelected) {
                 // Vivid accent for selected words
-                p.fillPath(path, QColor(baseColor.red(), baseColor.green(), baseColor.blue(), 130));
+                p.fillPath(
+                  path,
+                  QColor(
+                    baseColor.red(), baseColor.green(), baseColor.blue(), 130));
                 p.strokePath(path, QPen(baseColor.lighter(130), 1.8));
             } else if (isHovered) {
                 // Bright hover box
-                p.fillPath(path, QColor(baseColor.red(), baseColor.green(), baseColor.blue(), 80));
+                p.fillPath(
+                  path,
+                  QColor(
+                    baseColor.red(), baseColor.green(), baseColor.blue(), 80));
                 p.strokePath(path, QPen(baseColor.lighter(150), 1.5));
             } else {
                 // Subtle ambient box (Google Lens / Windows OCR style)
-                p.fillPath(path, QColor(baseColor.red(), baseColor.green(), baseColor.blue(), 25));
-                p.strokePath(path, QPen(QColor(baseColor.red(), baseColor.green(), baseColor.blue(), 90), 1));
+                p.fillPath(
+                  path,
+                  QColor(
+                    baseColor.red(), baseColor.green(), baseColor.blue(), 25));
+                p.strokePath(path,
+                             QPen(QColor(baseColor.red(),
+                                         baseColor.green(),
+                                         baseColor.blue(),
+                                         90),
+                                  1));
             }
         }
     }
 
     // Drag selection marquee box
     if (m_isSelecting) {
-        QRect selRect = QRect(m_selectionStart, m_selectionCurrent).normalized();
-        p.fillRect(selRect, QColor(baseColor.red(), baseColor.green(), baseColor.blue(), 50));
+        QRect selRect =
+          QRect(m_selectionStart, m_selectionCurrent).normalized();
+        p.fillRect(
+          selRect,
+          QColor(baseColor.red(), baseColor.green(), baseColor.blue(), 50));
         p.setPen(QPen(baseColor, 1.5, Qt::DashLine));
         p.drawRect(selRect);
     }
@@ -294,7 +313,8 @@ void OcrCanvas::mouseMoveEvent(QMouseEvent* event)
 {
     if (m_isSelecting) {
         m_selectionCurrent = event->pos();
-        QRect selRect = QRect(m_selectionStart, m_selectionCurrent).normalized();
+        QRect selRect =
+          QRect(m_selectionStart, m_selectionCurrent).normalized();
 
         for (int i = 0; i < m_wordBoxes.size(); ++i) {
             QRect cRect = mapToCanvas(m_wordBoxes.at(i));
@@ -355,10 +375,11 @@ void OcrCanvas::leaveEvent(QEvent*)
 void OcrCanvas::contextMenuEvent(QContextMenuEvent* event)
 {
     QMenu menu(this);
-    menu.setStyleSheet(
-      QStringLiteral("QMenu { background-color: #23272e; color: #abb2bf; border: 1px solid #3b4048; border-radius: 6px; padding: 4px; }"
-                     "QMenu::item { padding: 6px 20px; border-radius: 4px; }"
-                     "QMenu::item:selected { background-color: #3e4451; color: #ffffff; }"));
+    menu.setStyleSheet(QStringLiteral(
+      "QMenu { background-color: #23272e; color: #abb2bf; border: 1px solid "
+      "#3b4048; border-radius: 6px; padding: 4px; }"
+      "QMenu::item { padding: 6px 20px; border-radius: 4px; }"
+      "QMenu::item:selected { background-color: #3e4451; color: #ffffff; }"));
 
     int clickedIdx = findWordAt(event->pos());
     if (clickedIdx >= 0 && !m_selectedIndices.contains(clickedIdx)) {
@@ -370,26 +391,33 @@ void OcrCanvas::contextMenuEvent(QContextMenuEvent* event)
 
     QString selText = selectedText();
     if (!selText.isEmpty()) {
-        QAction* copySelAct = menu.addAction(tr("Copy Selected (%1 words)").arg(m_selectedIndices.size()));
+        QAction* copySelAct = menu.addAction(
+          tr("Copy Selected (%1 words)").arg(m_selectedIndices.size()));
         connect(copySelAct, &QAction::triggered, this, [this, selText]() {
             QApplication::clipboard()->setText(selText);
-            emit statusMessageRequested(tr("Copied %1 words to clipboard").arg(m_selectedIndices.size()));
+            emit statusMessageRequested(
+              tr("Copied %1 words to clipboard").arg(m_selectedIndices.size()));
         });
 
         QAction* searchSelAct = menu.addAction(tr("Web Search Selected"));
         connect(searchSelAct, &QAction::triggered, this, [selText]() {
-            if (selText.startsWith(QStringLiteral("http://"), Qt::CaseInsensitive) ||
-                selText.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
+            if (selText.startsWith(QStringLiteral("http://"),
+                                   Qt::CaseInsensitive) ||
+                selText.startsWith(QStringLiteral("https://"),
+                                   Qt::CaseInsensitive)) {
                 QDesktopServices::openUrl(QUrl(selText.trimmed()));
             } else {
-                QUrl url(QStringLiteral("https://www.google.com/search?q=") + QUrl::toPercentEncoding(selText));
+                QUrl url(QStringLiteral("https://www.google.com/search?q=") +
+                         QUrl::toPercentEncoding(selText));
                 QDesktopServices::openUrl(url);
             }
         });
 
         QAction* transSelAct = menu.addAction(tr("Translate Selected"));
         connect(transSelAct, &QAction::triggered, this, [selText]() {
-            QUrl url(QStringLiteral("https://translate.google.com/?sl=auto&tl=en&text=") + QUrl::toPercentEncoding(selText));
+            QUrl url(QStringLiteral(
+                       "https://translate.google.com/?sl=auto&tl=en&text=") +
+                     QUrl::toPercentEncoding(selText));
             QDesktopServices::openUrl(url);
         });
 
@@ -408,11 +436,13 @@ void OcrCanvas::contextMenuEvent(QContextMenuEvent* event)
     menu.addSeparator();
 
     QAction* selectAllAct = menu.addAction(tr("Select All Words"));
-    connect(selectAllAct, &QAction::triggered, this, &OcrCanvas::selectAllWords);
+    connect(
+      selectAllAct, &QAction::triggered, this, &OcrCanvas::selectAllWords);
 
     if (!m_selectedIndices.isEmpty()) {
         QAction* clearSelAct = menu.addAction(tr("Clear Selection"));
-        connect(clearSelAct, &QAction::triggered, this, &OcrCanvas::clearSelection);
+        connect(
+          clearSelAct, &QAction::triggered, this, &OcrCanvas::clearSelection);
     }
 
     menu.exec(event->globalPos());
@@ -441,10 +471,13 @@ OcrWidget::OcrWidget(const QPixmap& pixmap,
   , m_toastTimer(new QTimer(this))
 {
     // Filter out font shaper warning logs
-    QLoggingCategory::setFilterRules(QStringLiteral("qt.text.font.db.warning=false\nqt.text.font.warning=false\nqt.text.font=false"));
+    QLoggingCategory::setFilterRules(
+      QStringLiteral("qt.text.font.db.warning=false\nqt.text.font.warning="
+                     "false\nqt.text.font=false"));
 
     setWindowIcon(QIcon(GlobalValues::iconPath()));
-    setWindowFlags(Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint | Qt::Dialog);
+    setWindowFlags(Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint |
+                   Qt::Dialog);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose);
     setWindowTitle(tr("Flameshot Text Recognition (OCR)"));
@@ -461,7 +494,8 @@ OcrWidget::OcrWidget(const QPixmap& pixmap,
     new QShortcut(QKeySequence(Qt::Key_Escape), this, SLOT(close()));
     new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Q), this, SLOT(close()));
     new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this, SLOT(searchWeb()));
-    new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_T), this, SLOT(translateText()));
+    new QShortcut(
+      QKeySequence(Qt::CTRL | Qt::Key_T), this, SLOT(translateText()));
     new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_S), this, SLOT(saveToFile()));
 
     // Center on screen or near capture geometry
@@ -504,7 +538,8 @@ void OcrWidget::setupUi()
     titleLabel->setObjectName(QStringLiteral("titleLabel"));
     headerLayout->addWidget(titleLabel);
 
-    m_statsBadge = new QLabel(tr("%1 words • %2 lines").arg(m_words.size()).arg(m_lines.size()), this);
+    m_statsBadge = new QLabel(
+      tr("%1 words • %2 lines").arg(m_words.size()).arg(m_lines.size()), this);
     m_statsBadge->setObjectName(QStringLiteral("statsBadge"));
     headerLayout->addWidget(m_statsBadge);
 
@@ -545,18 +580,25 @@ void OcrWidget::setupUi()
     splitter->setObjectName(QStringLiteral("splitter"));
     splitter->setChildrenCollapsible(false);
 
-    // Left Pane: Visual Canvas Container (with Horizontal & Vertical Scrollbars)
+    // Left Pane: Visual Canvas Container (with Horizontal & Vertical
+    // Scrollbars)
     auto* canvasContainer = new QWidget(this);
     auto* canvasLayout = new QVBoxLayout(canvasContainer);
     canvasLayout->setContentsMargins(0, 0, 0, 0);
     canvasLayout->setSpacing(4);
 
-    m_canvas = new OcrCanvas(m_pixmap, m_wordBoxes, m_words, m_lineBoxes, m_lines, this);
-    connect(m_canvas, &OcrCanvas::wordDoubleClicked, this, [this](const QString& w) {
-        showToast(tr("Copied word: \"%1\"").arg(w));
-    });
-    connect(m_canvas, &OcrCanvas::statusMessageRequested, this, &OcrWidget::showToast);
-    connect(m_canvas, &OcrCanvas::zoomChanged, this, &OcrWidget::updateZoomBadge);
+    m_canvas =
+      new OcrCanvas(m_pixmap, m_wordBoxes, m_words, m_lineBoxes, m_lines, this);
+    connect(
+      m_canvas, &OcrCanvas::wordDoubleClicked, this, [this](const QString& w) {
+          showToast(tr("Copied word: \"%1\"").arg(w));
+      });
+    connect(m_canvas,
+            &OcrCanvas::statusMessageRequested,
+            this,
+            &OcrWidget::showToast);
+    connect(
+      m_canvas, &OcrCanvas::zoomChanged, this, &OcrWidget::updateZoomBadge);
 
     auto* scrollArea = new QScrollArea(this);
     scrollArea->setObjectName(QStringLiteral("canvasScrollArea"));
@@ -622,7 +664,10 @@ void OcrWidget::setupUi()
     m_searchBox->setObjectName(QStringLiteral("searchBox"));
     m_searchBox->setPlaceholderText(tr("🔍 Find in text..."));
     m_searchBox->setClearButtonEnabled(true);
-    connect(m_searchBox, &QLineEdit::textChanged, this, &OcrWidget::onSearchTextChanged);
+    connect(m_searchBox,
+            &QLineEdit::textChanged,
+            this,
+            &OcrWidget::onSearchTextChanged);
     rightLayout->addWidget(m_searchBox);
 
     // Format mode selector tabs
@@ -692,7 +737,8 @@ void OcrWidget::setupUi()
     auto* copySelBtn = new QPushButton(tr("🔠 Copy Selected"), this);
     copySelBtn->setObjectName(QStringLiteral("copySelBtn"));
     copySelBtn->setCursor(Qt::PointingHandCursor);
-    connect(copySelBtn, &QPushButton::clicked, this, &OcrWidget::copySelectedText);
+    connect(
+      copySelBtn, &QPushButton::clicked, this, &OcrWidget::copySelectedText);
     toolbarLayout->addWidget(copySelBtn);
 
     auto* searchBtn = new QPushButton(tr("🔍 Web Search"), this);
@@ -748,156 +794,156 @@ void OcrWidget::applyTheme()
     QString accentHover = m_accentColor.lighter(135).name();
     QString accentPressed = m_accentColor.darker(120).name();
 
-    setStyleSheet(QString(
-      "#mainContainer {"
-      "    background-color: #1e222b;"
-      "    border: 1px solid #333842;"
-      "    border-radius: 10px;"
-      "}"
-      "#titleLabel {"
-      "    color: #ffffff;"
-      "    font-size: 14px;"
-      "    font-weight: bold;"
-      "}"
-      "#statsBadge, #zoomBadge {"
-      "    color: #abb2bf;"
-      "    background-color: #282c34;"
-      "    border: 1px solid #3e4451;"
-      "    border-radius: 10px;"
-      "    padding: 2px 8px;"
-      "    font-size: 11px;"
-      "}"
-      "#closeBtn {"
-      "    background: transparent;"
-      "    color: #abb2bf;"
-      "    border: none;"
-      "    border-radius: 14px;"
-      "    font-size: 14px;"
-      "}"
-      "#closeBtn:hover {"
-      "    background-color: #e06c75;"
-      "    color: #ffffff;"
-      "}"
-      "#toastLabel {"
-      "    background-color: %1;"
-      "    color: #ffffff;"
-      "    font-weight: bold;"
-      "    border-radius: 6px;"
-      "    padding: 6px 12px;"
-      "    font-size: 12px;"
-      "}"
-      "#searchBox {"
-      "    background-color: #282c34;"
-      "    color: #abb2bf;"
-      "    border: 1px solid #3e4451;"
-      "    border-radius: 6px;"
-      "    padding: 6px 10px;"
-      "    font-size: 12px;"
-      "}"
-      "#searchBox:focus {"
-      "    border: 1px solid %1;"
-      "    color: #ffffff;"
-      "}"
-      "#fmtBtn, #lineBtn, #singleBtn, #zoomBtn {"
-      "    background-color: #282c34;"
-      "    color: #abb2bf;"
-      "    border: 1px solid #3e4451;"
-      "    border-radius: 4px;"
-      "    padding: 2px 6px;"
-      "    font-size: 11px;"
-      "}"
-      "#zoomBtn:hover {"
-      "    background-color: #3e4451;"
-      "    color: #ffffff;"
-      "    border: 1px solid %1;"
-      "}"
-      "#fmtBtn:checked, #lineBtn:checked, #singleBtn:checked {"
-      "    background-color: %1;"
-      "    color: #ffffff;"
-      "    border: 1px solid %1;"
-      "    font-weight: bold;"
-      "}"
-      "#canvasScrollArea {"
-      "    border: 1px solid #333842;"
-      "    border-radius: 6px;"
-      "    background-color: #16181d;"
-      "}"
-      "QScrollBar:vertical {"
-      "    background: #1e222b;"
-      "    width: 10px;"
-      "    border-radius: 5px;"
-      "    margin: 0px;"
-      "}"
-      "QScrollBar::handle:vertical {"
-      "    background: #3e4451;"
-      "    min-height: 24px;"
-      "    border-radius: 5px;"
-      "}"
-      "QScrollBar::handle:vertical:hover {"
-      "    background: %1;"
-      "}"
-      "QScrollBar:horizontal {"
-      "    background: #1e222b;"
-      "    height: 10px;"
-      "    border-radius: 5px;"
-      "    margin: 0px;"
-      "}"
-      "QScrollBar::handle:horizontal {"
-      "    background: #3e4451;"
-      "    min-width: 24px;"
-      "    border-radius: 5px;"
-      "}"
-      "QScrollBar::handle:horizontal:hover {"
-      "    background: %1;"
-      "}"
-      "QScrollBar::add-line, QScrollBar::sub-line {"
-      "    border: none;"
-      "    background: none;"
-      "}"
-      "#textEdit {"
-      "    background-color: #21252b;"
-      "    color: #d7dae0;"
-      "    border: 1px solid #333842;"
-      "    border-radius: 6px;"
-      "    padding: 10px;"
-      "    font-size: 13px;"
-      "    line-height: 1.6;"
-      "}"
-      "#copyAllBtn {"
-      "    background-color: %1;"
-      "    color: #ffffff;"
-      "    border: 1px solid rgba(255, 255, 255, 0.25);"
-      "    border-radius: 6px;"
-      "    padding: 6px 16px;"
-      "    font-weight: bold;"
-      "    font-size: 13px;"
-      "}"
-      "#copyAllBtn:hover {"
-      "    background-color: %2;"
-      "    border: 1px solid rgba(255, 255, 255, 0.6);"
-      "    color: #ffffff;"
-      "}"
-      "#copyAllBtn:pressed {"
-      "    background-color: %3;"
-      "}"
-      "#copySelBtn, #actionBtn, #doneBtn {"
-      "    background-color: #282c34;"
-      "    color: #d7dae0;"
-      "    border: 1px solid #3e4451;"
-      "    border-radius: 6px;"
-      "    padding: 6px 12px;"
-      "    font-size: 12px;"
-      "    font-weight: 500;"
-      "}"
-      "#copySelBtn:hover, #actionBtn:hover, #doneBtn:hover {"
-      "    background-color: #3e4451;"
-      "    color: #ffffff;"
-      "    border: 1px solid %1;"
-      "}"
-      "#copySelBtn:pressed, #actionBtn:pressed, #doneBtn:pressed {"
-      "    background-color: #21252b;"
-      "}")
-      .arg(accentHex, accentHover, accentPressed));
+    setStyleSheet(
+      QString("#mainContainer {"
+              "    background-color: #1e222b;"
+              "    border: 1px solid #333842;"
+              "    border-radius: 10px;"
+              "}"
+              "#titleLabel {"
+              "    color: #ffffff;"
+              "    font-size: 14px;"
+              "    font-weight: bold;"
+              "}"
+              "#statsBadge, #zoomBadge {"
+              "    color: #abb2bf;"
+              "    background-color: #282c34;"
+              "    border: 1px solid #3e4451;"
+              "    border-radius: 10px;"
+              "    padding: 2px 8px;"
+              "    font-size: 11px;"
+              "}"
+              "#closeBtn {"
+              "    background: transparent;"
+              "    color: #abb2bf;"
+              "    border: none;"
+              "    border-radius: 14px;"
+              "    font-size: 14px;"
+              "}"
+              "#closeBtn:hover {"
+              "    background-color: #e06c75;"
+              "    color: #ffffff;"
+              "}"
+              "#toastLabel {"
+              "    background-color: %1;"
+              "    color: #ffffff;"
+              "    font-weight: bold;"
+              "    border-radius: 6px;"
+              "    padding: 6px 12px;"
+              "    font-size: 12px;"
+              "}"
+              "#searchBox {"
+              "    background-color: #282c34;"
+              "    color: #abb2bf;"
+              "    border: 1px solid #3e4451;"
+              "    border-radius: 6px;"
+              "    padding: 6px 10px;"
+              "    font-size: 12px;"
+              "}"
+              "#searchBox:focus {"
+              "    border: 1px solid %1;"
+              "    color: #ffffff;"
+              "}"
+              "#fmtBtn, #lineBtn, #singleBtn, #zoomBtn {"
+              "    background-color: #282c34;"
+              "    color: #abb2bf;"
+              "    border: 1px solid #3e4451;"
+              "    border-radius: 4px;"
+              "    padding: 2px 6px;"
+              "    font-size: 11px;"
+              "}"
+              "#zoomBtn:hover {"
+              "    background-color: #3e4451;"
+              "    color: #ffffff;"
+              "    border: 1px solid %1;"
+              "}"
+              "#fmtBtn:checked, #lineBtn:checked, #singleBtn:checked {"
+              "    background-color: %1;"
+              "    color: #ffffff;"
+              "    border: 1px solid %1;"
+              "    font-weight: bold;"
+              "}"
+              "#canvasScrollArea {"
+              "    border: 1px solid #333842;"
+              "    border-radius: 6px;"
+              "    background-color: #16181d;"
+              "}"
+              "QScrollBar:vertical {"
+              "    background: #1e222b;"
+              "    width: 10px;"
+              "    border-radius: 5px;"
+              "    margin: 0px;"
+              "}"
+              "QScrollBar::handle:vertical {"
+              "    background: #3e4451;"
+              "    min-height: 24px;"
+              "    border-radius: 5px;"
+              "}"
+              "QScrollBar::handle:vertical:hover {"
+              "    background: %1;"
+              "}"
+              "QScrollBar:horizontal {"
+              "    background: #1e222b;"
+              "    height: 10px;"
+              "    border-radius: 5px;"
+              "    margin: 0px;"
+              "}"
+              "QScrollBar::handle:horizontal {"
+              "    background: #3e4451;"
+              "    min-width: 24px;"
+              "    border-radius: 5px;"
+              "}"
+              "QScrollBar::handle:horizontal:hover {"
+              "    background: %1;"
+              "}"
+              "QScrollBar::add-line, QScrollBar::sub-line {"
+              "    border: none;"
+              "    background: none;"
+              "}"
+              "#textEdit {"
+              "    background-color: #21252b;"
+              "    color: #d7dae0;"
+              "    border: 1px solid #333842;"
+              "    border-radius: 6px;"
+              "    padding: 10px;"
+              "    font-size: 13px;"
+              "    line-height: 1.6;"
+              "}"
+              "#copyAllBtn {"
+              "    background-color: %1;"
+              "    color: #ffffff;"
+              "    border: 1px solid rgba(255, 255, 255, 0.25);"
+              "    border-radius: 6px;"
+              "    padding: 6px 16px;"
+              "    font-weight: bold;"
+              "    font-size: 13px;"
+              "}"
+              "#copyAllBtn:hover {"
+              "    background-color: %2;"
+              "    border: 1px solid rgba(255, 255, 255, 0.6);"
+              "    color: #ffffff;"
+              "}"
+              "#copyAllBtn:pressed {"
+              "    background-color: %3;"
+              "}"
+              "#copySelBtn, #actionBtn, #doneBtn {"
+              "    background-color: #282c34;"
+              "    color: #d7dae0;"
+              "    border: 1px solid #3e4451;"
+              "    border-radius: 6px;"
+              "    padding: 6px 12px;"
+              "    font-size: 12px;"
+              "    font-weight: 500;"
+              "}"
+              "#copySelBtn:hover, #actionBtn:hover, #doneBtn:hover {"
+              "    background-color: #3e4451;"
+              "    color: #ffffff;"
+              "    border: 1px solid %1;"
+              "}"
+              "#copySelBtn:pressed, #actionBtn:pressed, #doneBtn:pressed {"
+              "    background-color: #21252b;"
+              "}")
+        .arg(accentHex, accentHover, accentPressed));
 }
 
 void OcrWidget::updateZoomBadge(qreal factor)
@@ -956,7 +1002,8 @@ void OcrWidget::searchWeb()
             txt.startsWith(QStringLiteral("https://"), Qt::CaseInsensitive)) {
             QDesktopServices::openUrl(QUrl(txt));
         } else {
-            QUrl url(QStringLiteral("https://www.google.com/search?q=") + QUrl::toPercentEncoding(txt));
+            QUrl url(QStringLiteral("https://www.google.com/search?q=") +
+                     QUrl::toPercentEncoding(txt));
             QDesktopServices::openUrl(url);
         }
     }
@@ -973,15 +1020,24 @@ void OcrWidget::translateText()
     }
     txt = txt.trimmed();
     if (!txt.isEmpty()) {
-        QUrl url(QStringLiteral("https://translate.google.com/?sl=auto&tl=en&text=") + QUrl::toPercentEncoding(txt));
+        QUrl url(
+          QStringLiteral("https://translate.google.com/?sl=auto&tl=en&text=") +
+          QUrl::toPercentEncoding(txt));
         QDesktopServices::openUrl(url);
     }
 }
 
 void OcrWidget::saveToFile()
 {
-    QString defaultName = QStringLiteral("ocr_") + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_hhmmss")) + QStringLiteral(".txt");
-    QString fileName = QFileDialog::getSaveFileName(this, tr("Save OCR Text"), defaultName, tr("Text Files (*.txt);;All Files (*)"));
+    QString defaultName =
+      QStringLiteral("ocr_") +
+      QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_hhmmss")) +
+      QStringLiteral(".txt");
+    QString fileName =
+      QFileDialog::getSaveFileName(this,
+                                   tr("Save OCR Text"),
+                                   defaultName,
+                                   tr("Text Files (*.txt);;All Files (*)"));
     if (!fileName.isEmpty()) {
         QFile file(fileName);
         if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -1022,7 +1078,8 @@ void OcrWidget::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         m_isDraggingWindow = true;
-        m_dragPosition = event->globalPosition().toPoint() - frameGeometry().topLeft();
+        m_dragPosition =
+          event->globalPosition().toPoint() - frameGeometry().topLeft();
     }
 }
 
@@ -1042,7 +1099,9 @@ void OcrWidget::mouseReleaseEvent(QMouseEvent* event)
 
 void OcrWidget::keyPressEvent(QKeyEvent* event)
 {
-    if (event->key() == Qt::Key_Escape || (event->modifiers() & Qt::ControlModifier && event->key() == Qt::Key_Q)) {
+    if (event->key() == Qt::Key_Escape ||
+        (event->modifiers() & Qt::ControlModifier &&
+         event->key() == Qt::Key_Q)) {
         close();
     } else {
         QWidget::keyPressEvent(event);

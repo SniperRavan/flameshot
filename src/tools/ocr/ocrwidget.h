@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include <QWidget>
 #include <QPixmap>
 #include <QRect>
+#include <QSet>
 #include <QStringList>
 #include <QVector>
-#include <QSet>
+#include <QWidget>
 
 class QLabel;
 class QPlainTextEdit;
@@ -148,7 +148,9 @@ private:
 
     bool m_isDraggingWindow{ false };
     QPoint m_dragPosition;
-    int m_currentFormatMode{ 0 }; // 0: Formatted, 1: Line by Line, 2: Single Line
+    int m_currentFormatMode{
+        0
+    }; // 0: Formatted, 1: Line by Line, 2: Single Line
 };
 
 #endif
