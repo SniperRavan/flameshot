@@ -142,7 +142,8 @@ void FlameshotDaemon::createPin(const QPixmap& capture, QRect geometry)
     }
 #endif
 
-    // Standalone fallback: when no daemon is active, show pin widget directly in the GUI process
+    // Standalone fallback: when no daemon is active, show pin widget directly
+    // in the GUI process
     if (Flameshot::instance()) {
         Flameshot::instance()->setExternalWidget(true);
     }
@@ -169,7 +170,8 @@ void FlameshotDaemon::createOcr(const QPixmap& capture,
                                 const QStringList& lines)
 {
     if (instance()) {
-        instance()->attachOcr(capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+        instance()->attachOcr(
+          capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
         return;
     }
 
@@ -179,10 +181,12 @@ void FlameshotDaemon::createOcr(const QPixmap& capture,
 #if defined(USE_KDSINGLEAPPLICATION) &&                                        \
   (defined(Q_OS_MACOS) || defined(Q_OS_WIN))
     auto kdsa = KDSingleApplication(QStringLiteral("org.flameshot.Flameshot"));
-    stream << QStringLiteral("attachOcr") << capture << geometry << fullText << wordBoxes << words << lineBoxes << lines;
+    stream << QStringLiteral("attachOcr") << capture << geometry << fullText
+           << wordBoxes << words << lineBoxes << lines;
     kdsa.sendMessage(data);
 #else
-    stream << capture << geometry << fullText << wordBoxes << words << lineBoxes << lines;
+    stream << capture << geometry << fullText << wordBoxes << words << lineBoxes
+           << lines;
     QDBusConnection sessionBus = QDBusConnection::sessionBus();
     if (sessionBus.isConnected()) {
         QDBusMessage m = createMethodCall(QStringLiteral("attachOcr"));
@@ -194,11 +198,13 @@ void FlameshotDaemon::createOcr(const QPixmap& capture,
     }
 #endif
 
-    // Standalone fallback: when no daemon is active, show OCR widget directly in the GUI process
+    // Standalone fallback: when no daemon is active, show OCR widget directly
+    // in the GUI process
     if (Flameshot::instance()) {
         Flameshot::instance()->setExternalWidget(true);
     }
-    auto* ocrWidget = new OcrWidget(capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+    auto* ocrWidget = new OcrWidget(
+      capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
     QObject::connect(ocrWidget, &QObject::destroyed, []() {
         if (Flameshot::instance()) {
             Flameshot::instance()->setExternalWidget(false);
@@ -397,7 +403,8 @@ void FlameshotDaemon::attachOcr(const QPixmap& capture,
                                 const QVector<QRect>& lineBoxes,
                                 const QStringList& lines)
 {
-    auto* ocrWidget = new OcrWidget(capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+    auto* ocrWidget = new OcrWidget(
+      capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
     m_widgets.append(ocrWidget);
     connect(ocrWidget, &QObject::destroyed, this, [=, this]() {
         m_widgets.removeOne(ocrWidget);
@@ -447,7 +454,8 @@ void FlameshotDaemon::attachOcr(const QByteArray& data)
     QVector<QRect> lineBoxes;
     QStringList lines;
 
-    stream >> pixmap >> geometry >> fullText >> wordBoxes >> words >> lineBoxes >> lines;
+    stream >> pixmap >> geometry >> fullText >> wordBoxes >> words >>
+      lineBoxes >> lines;
 
     attachOcr(pixmap, geometry, fullText, wordBoxes, words, lineBoxes, lines);
 }
@@ -632,11 +640,14 @@ void FlameshotDaemon::messageReceivedFromSecondaryInstance(
         QStringList words;
         QVector<QRect> lineBoxes;
         QStringList lines;
-        stream >> capture >> geometry >> fullText >> wordBoxes >> words >> lineBoxes >> lines;
+        stream >> capture >> geometry >> fullText >> wordBoxes >> words >>
+          lineBoxes >> lines;
         if (!capture.isNull() || !fullText.isEmpty()) {
-            FlameshotDaemon::instance()->attachOcr(capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
+            FlameshotDaemon::instance()->attachOcr(
+              capture, geometry, fullText, wordBoxes, words, lineBoxes, lines);
         } else {
-            qWarning() << "Received \"attachOcr\" from second instance, but data is empty!";
+            qWarning() << "Received \"attachOcr\" from second instance, but "
+                          "data is empty!";
         }
 #endif
     } else {
