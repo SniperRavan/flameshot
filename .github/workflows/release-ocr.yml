@@ -1,0 +1,57 @@
+name: Release Flameshot with OCR
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build Linux Deb & Binary (with OCR)
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get -y --no-install-recommends install \
+            cmake \
+            extra-cmake-modules \
+            build-essential \
+            qt6-base-dev \
+            qt6-svg-dev \
+            qt6-tools-dev \
+            libtesseract-dev \
+            tesseract-ocr \
+            file
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_OCR=ON
+
+      - name: Build Flameshot
+        run: |
+          cmake --build build -j$(nproc)
+
+      - name: Create Tarball
+        run: |
+          mkdir -p dist
+          cp build/src/flameshot dist/flameshot-ocr
+          tar -czvf dist/flameshot-ocr-linux-x86_64.tar.gz -C dist flameshot-ocr
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/flameshot-ocr-linux-x86_64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
